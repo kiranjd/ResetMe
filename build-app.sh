@@ -30,14 +30,26 @@ cd "$project_dir"
 swift build -c release --product reset
 readonly binary_dir="$(swift build -c release --show-bin-path)"
 
-mkdir -p "$staging/Contents/MacOS" "$staging/Contents/Resources"
+readonly sparkle_framework="$binary_dir/Sparkle.framework"
+test -d "$sparkle_framework"
+
+mkdir -p "$staging/Contents/MacOS" "$staging/Contents/Resources" "$staging/Contents/Frameworks"
 install -m 755 "$binary_dir/reset" "$staging/Contents/MacOS/reset"
+ditto "$sparkle_framework" "$staging/Contents/Frameworks/Sparkle.framework"
 install -m 644 "$project_dir/Assets/openai.ico" "$staging/Contents/Resources/openai.ico"
+for provider in codex claude; do
+    install -m 644 "$project_dir/Assets/ProviderIcon-$provider.png" "$staging/Contents/Resources/ProviderIcon-$provider.png"
+done
 install -m 644 "$project_dir/Assets/ResetMe.icns" "$staging/Contents/Resources/ResetMe.icns"
+install -m 644 "$project_dir/THIRD_PARTY_NOTICES.md" "$staging/Contents/Resources/THIRD_PARTY_NOTICES.md"
+install -m 644 "$project_dir/Licenses/Sparkle-LICENSE" "$staging/Contents/Resources/Sparkle-LICENSE"
 install -m 644 "$project_dir/Info.plist" "$staging/Contents/Info.plist"
 
 plutil -lint "$staging/Contents/Info.plist" >/dev/null
 test -x "$staging/Contents/MacOS/reset"
+test -x "$staging/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle"
+otool -L "$staging/Contents/MacOS/reset" | grep -Fq '@rpath/Sparkle.framework/Versions/B/Sparkle'
+otool -l "$staging/Contents/MacOS/reset" | grep -Fq '@loader_path/../Frameworks'
 
 if [[ -e "$destination" || -L "$destination" ]]; then
     mv "$destination" "$backup"

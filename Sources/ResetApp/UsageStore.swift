@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import ResetCore
 
-enum Placement: String, CaseIterable { case notch = "Notch", edge = "Edge", floating = "Floating" }
 
 @MainActor final class IslandPresentation: ObservableObject {
     @Published var progress = 0.0
@@ -112,13 +111,12 @@ enum Placement: String, CaseIterable { case notch = "Notch", edge = "Edge", floa
         get { motion.progress }
         set { motion.progress = newValue }
     }
-    @Published var placement = Placement(rawValue: UserDefaults.standard.string(forKey: "placement") ?? "Notch") ?? .notch
+    @Published var indicatorHidden = false
     @Published var samples: [UsageSample] = []
     @Published var hasNotch = false
     @Published var notchSize = CGSize(width: 210, height: 40)
     var onExpand: ((Bool) -> Void)?
-    var onPlacement: (() -> Void)?
-    var onFocus: (() -> Void)?
+    var onVisibility: (() -> Void)?
     var onData: (() -> Void)?
     private var process: Process?
     private var input: Pipe?
@@ -131,7 +129,6 @@ enum Placement: String, CaseIterable { case notch = "Notch", edge = "Edge", floa
     private var providerTask: Task<Void, Never>?
     private var retryNotBefore: [UsageProvider: Date] = [:]
     private var generation = UUID()
-    var isDragging = false
     var menuTracking = false
     private var hoveredRegions = Set<String>()
     private var hoverIntent = false
@@ -157,12 +154,6 @@ enum Placement: String, CaseIterable { case notch = "Notch", edge = "Edge", floa
         return UsageMath.pointsPerHour(samples: samples.filter { now.timeIntervalSince($0.timestamp) <= 3600 }, bucketID: selected.id, resetAt: window.resetsAt)
     }
     init() {
-        // Migrate the first prototype's test placement to the requested notch default.
-        if UserDefaults.standard.integer(forKey: "placementVersion") < 2 {
-            placement = .notch
-            UserDefaults.standard.set("Notch", forKey: "placement")
-            UserDefaults.standard.set(2, forKey: "placementVersion")
-        }
         if let data = UserDefaults.standard.data(forKey: "usageSamples"), let stored = try? JSONDecoder().decode([UsageSample].self, from: data) {
             samples = stored.filter { Date().timeIntervalSince($0.timestamp) < 86400 }
         }
@@ -171,14 +162,14 @@ enum Placement: String, CaseIterable { case notch = "Notch", edge = "Edge", floa
     }
     func hover(_ inside: Bool, region: String = "panel") {
         if inside { hoveredRegions.insert(region) } else { hoveredRegions.remove(region) }
-        guard !isDragging, !menuTracking else { return }
+        guard !menuTracking else { return }
         let shouldOpen = !hoveredRegions.isEmpty
         guard shouldOpen != hoverIntent || (hoverTask == nil && expanded != shouldOpen) else { return }
         hoverIntent = shouldOpen
         hoverTask?.cancel()
         hoverTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: shouldOpen ? 120_000_000 : 140_000_000)
-            guard !Task.isCancelled, !self.isDragging, !self.menuTracking else { return }
+            guard !Task.isCancelled, !self.menuTracking else { return }
             setExpanded(shouldOpen)
             hoverTask = nil
         }
@@ -203,8 +194,10 @@ enum Placement: String, CaseIterable { case notch = "Notch", edge = "Edge", floa
         return min(600, dayCardHeight + (weeklyHistoryOpen ? 120 : 0) + 58 + max(62, groups) + (!weeklyHistoryOpen || displayedCreditDates.isEmpty ? 0 : displayedCreditDates.count == 1 ? 40 : 47 + CGFloat((displayedCreditDates.count + 2) / 3) * 38) + (error != nil ? 68 : 0))
     }
     var islandHeight: CGFloat { detailHeight - 78 + notchSize.height - 7 }
-    func move(to value: Placement) {
-        placement = value; UserDefaults.standard.set(value.rawValue, forKey: "placement"); onPlacement?()
+    func toggleIndicator() {
+        indicatorHidden.toggle()
+        dismiss()
+        onVisibility?()
     }
     func countdown(_ date: Date?) -> String {
         guard let date else { return "Time unavailable" }

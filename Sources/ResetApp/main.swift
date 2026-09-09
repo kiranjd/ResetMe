@@ -21,26 +21,22 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     override func mouseExited(with event: NSEvent) { if region != "canvas" { store?.hover(false, region: region) } }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
-@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let store = UsageStore()
-    var panel: ResetPanel!
     var notchPanel: ResetPanel!
     var statusItem: NSStatusItem!
-    var anchor = NSPoint.zero
     var notchGeometry: NotchGeometry?
     var screenID: CGDirectDisplayID?
     var observers: [NSObjectProtocol] = []
     var wakeObserver: NSObjectProtocol?
     var pointerMonitor: Any?
     var localPointerMonitor: Any?
-    var indicatorHidden = false
+    var visibilityItem: NSMenuItem?
     let notchAnimator = NotchAnimator()
     var lastPointer = NSEvent.mouseLocation
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        panel = makePanel(title: "ResetMe", size: NSSize(width: 164, height: 28))
-        let host = TrackingHost(rootView: PanelView(store: store)); host.store = store
-        panel.contentView = host
+        AppUpdater.shared.start()
         notchPanel = makePanel(title: "ResetMe notch", size: store.notchSize)
         notchPanel.hasShadow = false
         // The contour straddles the menu-bar safe area and must remain visible there.
@@ -57,13 +53,8 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
             self.updateNotchInteractivity()
         }
         store.onExpand = { [weak self] _ in self?.resize() }
-        store.onFocus = { [weak self] in
-            guard let self else { return }
-            if self.store.placement == .notch && self.store.hasNotch { self.notchPanel.makeKey() } else { self.panel.makeKey() }
-        }
-        store.onPlacement = { [weak self] in self?.place() }
         store.onData = { [weak self] in self?.resize(animated: false) }
-        NotificationCenter.default.addObserver(self, selector: #selector(dragged(_:)), name: .resetPanelDragged, object: nil)
+        store.onVisibility = { [weak self] in self?.resize(animated: false) }
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.place() } })
         observers.append(NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.store.menuTracking = true } })
         observers.append(NotificationCenter.default.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
@@ -84,15 +75,11 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = NSImage(systemSymbolName: "arrow.counterclockwise.circle", accessibilityDescription: "ResetMe usage")
         statusItem.button?.toolTip = "ResetMe"
-        let menu = NSMenu()
-        item("Show usage", action: #selector(show), menu: menu)
+        let menu = NSMenu(); menu.delegate = self
+        let visibility = NSMenuItem(title: "Hide ResetMe", action: #selector(toggleVisibility), keyEquivalent: "")
+        visibility.target = self; menu.addItem(visibility); visibilityItem = visibility
+        item("Check for Updates…", action: #selector(checkForUpdates), menu: menu)
         menu.addItem(.separator())
-        for placement in Placement.allCases {
-            let entry = NSMenuItem(title: placement.rawValue, action: #selector(changePlacement(_:)), keyEquivalent: "")
-            entry.representedObject = placement.rawValue; entry.target = self; menu.addItem(entry)
-        }
-        menu.addItem(.separator())
-        item("Hide / show indicator", action: #selector(toggleVisibility), menu: menu)
         item("Quit ResetMe", action: #selector(quit), menu: menu)
         statusItem.menu = menu
         place(); store.refresh()
@@ -108,7 +95,7 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     func makePanel(title: String, size: NSSize) -> ResetPanel {
         let window = ResetPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         window.title = title; window.isOpaque = false; window.backgroundColor = .clear; window.hasShadow = true
-        window.level = .floating; window.hidesOnDeactivate = false; window.isMovableByWindowBackground = false
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1); window.hidesOnDeactivate = false; window.isMovableByWindowBackground = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenNone]
         window.acceptsMouseMovedEvents = true; window.isReleasedWhenClosed = false
         return window
@@ -117,38 +104,27 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         let entry = NSMenuItem(title: title, action: action, keyEquivalent: ""); entry.target = self; menu.addItem(entry)
     }
     func targetScreen() -> NSScreen {
-        if store.placement == .notch, let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 && $0.auxiliaryTopLeftArea != nil }) { return screen }
+        if let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 && $0.auxiliaryTopLeftArea != nil }) { return screen }
         if let screenID, let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == screenID }) { return screen }
         return NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens[0]
     }
     func place() {
-        let screen = targetScreen(), visible = screen.visibleFrame
+        let screen = targetScreen()
         screenID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         notchGeometry = NotchGeometry(screenFrame: screen.frame, safeTop: screen.safeAreaInsets.top, leftArea: screen.auxiliaryTopLeftArea, rightArea: screen.auxiliaryTopRightArea)
         store.hasNotch = notchGeometry != nil
-        switch store.placement {
-        case .notch:
-            if let geometry = notchGeometry {
-                store.notchSize = geometry.frame.size
-                notchPanel.setFrame(IslandMotion.canvasFrame(geometry.frame), display: true)
-                anchor = NSPoint(x: geometry.frame.midX, y: geometry.frame.minY - 6)
-            } else { anchor = NSPoint(x: screen.frame.midX, y: visible.maxY - 6) }
-        case .edge: anchor = NSPoint(x: visible.maxX - 92, y: visible.maxY - 80)
-        case .floating:
-            if let point = UserDefaults.standard.string(forKey: "floatingAnchor") { anchor = NSPointFromString(point) }
-            else { anchor = NSPoint(x: visible.maxX - 240, y: visible.maxY - 80) }
-            if !NSScreen.screens.contains(where: { $0.visibleFrame.contains(anchor) }) { anchor = NSPoint(x: visible.midX, y: visible.maxY - 80) }
+        if let geometry = notchGeometry {
+            store.notchSize = geometry.frame.size
+            notchPanel.setFrame(IslandMotion.canvasFrame(geometry.frame), display: true)
         }
         resize(animated: false)
     }
     func updateHover(at point: NSPoint) {
         lastPointer = point
-        guard !indicatorHidden, !store.isDragging else { return }
+        guard !store.indicatorHidden else { return }
         updateNotchInteractivity()
-        let nearNotch = store.placement == .notch && store.hasNotch && (visibleNotchFrame?.insetBy(dx: -12, dy: -10).contains(point) ?? false)
-        let nearPanel = panel.isVisible && panel.frame.insetBy(dx: -3, dy: -3).contains(point)
+        let nearNotch = store.hasNotch && (visibleNotchFrame?.insetBy(dx: -12, dy: -10).contains(point) ?? false)
         store.hover(nearNotch, region: "notch")
-        store.hover(nearPanel, region: "panel")
     }
     var visibleNotchFrame: CGRect? {
         notchGeometry.map { IslandMotion.frame(notch: $0.frame, expandedHeight: store.islandHeight, progress: store.islandProgress) }
@@ -158,40 +134,20 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         notchPanel.ignoresMouseEvents = !(visibleNotchFrame?.contains(lastPointer) ?? false)
     }
     func resize(animated: Bool = true) {
-        guard panel != nil, notchPanel != nil else { return }
-        let attached = store.placement == .notch && store.hasNotch
-        if attached && !indicatorHidden, notchGeometry != nil {
-            panel.orderOut(nil)
-            // A provider refresh must not snap an in-flight hover animation to its endpoint.
-            let shouldAnimate = (animated || notchAnimator.isRunning) && notchPanel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            notchAnimator.move(to: store.expanded ? 1 : 0, animated: shouldAnimate)
-            notchPanel.orderFrontRegardless()
-            return
-        } else { notchAnimator.stop(); notchPanel.orderOut(nil) }
-        if indicatorHidden { panel.orderOut(nil); return }
-        let size = store.expanded ? NSSize(width: 348, height: store.detailHeight) : NSSize(width: 164, height: 28)
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(anchor) }) ?? targetScreen()
-        let visible = screen.visibleFrame.insetBy(dx: 5, dy: 5)
-        let x = max(visible.minX, min(anchor.x - size.width / 2, visible.maxX - size.width))
-        let y = max(visible.minY, min(anchor.y - size.height, visible.maxY - size.height))
-        let frame = NSRect(origin: NSPoint(x: x, y: y), size: size)
-        if animated && panel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            NSAnimationContext.runAnimationGroup { context in context.duration = 0.16; panel.animator().setFrame(frame, display: true) }
-        } else { panel.setFrame(frame, display: true) }
-        panel.orderFrontRegardless()
+        guard notchPanel != nil else { return }
+        guard !store.indicatorHidden, notchGeometry != nil else {
+            notchAnimator.stop(); notchPanel.orderOut(nil); return
+        }
+        let shouldAnimate = (animated || notchAnimator.isRunning) && notchPanel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        notchAnimator.move(to: store.expanded ? 1 : 0, animated: shouldAnimate)
+        notchPanel.orderFrontRegardless()
     }
-    @objc func dragged(_ notification: Notification) {
-        let draggedWindow = notification.object as? NSWindow ?? panel!
-        anchor = NSPoint(x: draggedWindow.frame.midX, y: draggedWindow.frame.maxY)
-        UserDefaults.standard.set(NSStringFromPoint(anchor), forKey: "floatingAnchor")
-        notchPanel.orderOut(nil)
-        resize(animated: false)
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        visibilityItem?.title = store.hasNotch ? (store.indicatorHidden ? "Show ResetMe" : "Hide ResetMe") : "Notched display unavailable"
+        visibilityItem?.isEnabled = store.hasNotch
     }
-    @objc func show() { indicatorHidden = false; store.setExpanded(true); resize(animated: false); store.onFocus?() }
-    @objc func changePlacement(_ sender: NSMenuItem) {
-        if let value = sender.representedObject as? String, let p = Placement(rawValue: value) { indicatorHidden = false; store.dismiss(); store.move(to: p) }
-    }
-    @objc func toggleVisibility() { indicatorHidden.toggle(); store.dismiss(); resize(animated: false) }
+    @objc func toggleVisibility() { store.toggleIndicator() }
+    @objc func checkForUpdates() { AppUpdater.shared.checkForUpdates() }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationWillTerminate(_ notification: Notification) {
         MacTilt.shared.stop()

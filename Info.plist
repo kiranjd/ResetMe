@@ -32,5 +32,9 @@
     <string>Copyright © 2026 Kiran Jd</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/kiranjd/ResetMe/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>bvPzWuU7cDEYTIi2YbcAWmNd4MtOF2KKGPCW+EMbpYI=</string>
 </dict>
 </plist>

@@ -54,21 +54,16 @@ struct IslandView: View {
                         }.buttonStyle(.plain).disabled(store.refreshing)
                             .accessibilityLabel("Refresh usage").help(store.freshness)
                         Menu {
-                            Button("Rebuild dot mesh") { MatteSurfaceView.current?.rebuildMesh() }
+                            Button(store.indicatorHidden ? "Show ResetMe" : "Hide ResetMe") { store.toggleIndicator() }
+                            Button("Check for Updates…") { AppUpdater.shared.checkForUpdates() }
                             Divider()
                             if store.provider == .codex { Toggle("Enable Spark", isOn: Binding(get: { store.sparkEnabled }, set: { store.setSparkEnabled($0) })) }
                             Divider()
-                            ForEach(Placement.allCases, id: \.self) { placement in
-                                Button { store.move(to: placement) } label: {
-                                    Label(placement.rawValue, systemImage: store.placement == placement ? "checkmark" : "rectangle")
-                                }
-                            }
-                            Divider()
                             Button("Quit ResetMe") { NSApplication.shared.terminate(nil) }
                         } label: { Image(systemName: "ellipsis").frame(width: 16, height: 24).matteContentShade() }
-                            .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 20, height: 24).clipped().accessibilityLabel("Placement")
+                            .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 20, height: 24).clipped().accessibilityLabel("ResetMe menu")
                     }.foregroundStyle(.secondary).padding(.horizontal, 16).frame(height: store.notchSize.height - 7)
-                    PanelView(store: store, embedded: true)
+                    PanelView(store: store)
                 }.frame(width: 348, alignment: .top)
                     .opacity(reveal)
                     .blur(radius: 5 * (1 - reveal))
@@ -148,92 +143,19 @@ struct NotchContour: Shape {
         return path
     }
 }
-struct NotchView: View {
-    @ObservedObject var store: UsageStore
-    var size: CGSize? = nil
-    var body: some View {
-        ZStack {
-            NotchContour().stroke(.white.opacity(0.18), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            if store.usable {
-                NotchContour().trim(from: 0, to: (store.window?.remaining ?? 0) / 100)
-                    .stroke(store.tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-            } else {
-                NotchContour().stroke(.gray.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
-            }
-        }
-        .frame(width: size?.width ?? store.notchSize.width, height: size?.height ?? store.notchSize.height)
-        .contentShape(Rectangle())
-        .onTapGesture { store.setExpanded(true); store.onFocus?() }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(store.selected?.name ?? store.provider.displayName), \(store.window?.name ?? "quota"), \(store.remainingText) left")
-        .accessibilityValue(store.expanded ? "Expanded" : "Collapsed")
-    }
-}
 struct PanelView: View {
     @ObservedObject private var scene = SceneSettings.shared
     @ObservedObject var store: UsageStore
     @ObservedObject var motion: IslandPresentation
-    var embedded = false
-    init(store: UsageStore, embedded: Bool = false) { self.store = store; self.motion = store.motion; self.embedded = embedded }
-    var body: some View {
-        if embedded {
-            detail.preferredColorScheme(.dark).tint(themeAccent)
-        } else { surface }
-    }
-    var surface: some View {
-        Group {
-            if store.expanded { detail }
-            else { compact }
-        }
-        .background(.ultraThinMaterial)
-        .background(Color(red: 0.055, green: 0.065, blue: 0.07).opacity(0.95))
-        .clipShape(RoundedRectangle(cornerRadius: store.expanded ? 17 : 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: store.expanded ? 17 : 12).strokeBorder(.white.opacity(0.12), lineWidth: 0.6))
-        .preferredColorScheme(.dark).tint(themeAccent)
-        .onExitCommand { store.dismiss() }
-    }
-    var compact: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "gauge.with.dots.needle.50percent").font(.system(size: 10, weight: .medium)).foregroundStyle(store.tint)
-            Text(store.selected?.name == "GPT-5.3-Codex-Spark" ? "Spark" : (store.selected?.name ?? store.provider.displayName)).font(.system(size: 11, weight: .medium)).lineLimit(1)
-            Text(store.remainingText).font(.custom("Menlo-Bold", size: 11)).foregroundStyle(store.tint)
-        }.padding(.horizontal, 12).frame(width: 164, height: 28)
-            .overlay(DragSurface(store: store, compact: true))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(store.selected?.name ?? store.provider.displayName), \(store.remainingText) left")
-    }
+    init(store: UsageStore) { self.store = store; self.motion = store.motion }
+    var body: some View { detail.preferredColorScheme(.dark).tint(themeAccent) }
     var detail: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !embedded {
-            HStack(spacing: 10) {
-                HStack(spacing: 6) {
-                    ProviderPicker(store: store)
-                    Color.clear.frame(minWidth: 20, maxWidth: .infinity).overlay(DragSurface(store: store))
-                }.frame(height: 24)
-                Text(store.freshness).font(.system(size: 10)).foregroundStyle(.secondary)
-                Button { store.refresh() } label: {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 11)).frame(width: 20, height: 24)
-                }.buttonStyle(.plain).disabled(store.refreshing).accessibilityLabel("Refresh usage")
-                Menu {
-                            Button("Rebuild dot mesh") { MatteSurfaceView.current?.rebuildMesh() }
-                            Divider()
-                    if store.provider == .codex { Toggle("Enable Spark", isOn: Binding(get: { store.sparkEnabled }, set: { store.setSparkEnabled($0) })) }
-                    Divider()
-                    ForEach(Placement.allCases, id: \.self) { placement in
-                        Button { store.move(to: placement) } label: { Label(placement.rawValue, systemImage: store.placement == placement ? "checkmark" : "rectangle") }
-                    }
-                    Divider()
-                    Button("Quit ResetMe") { NSApplication.shared.terminate(nil) }
-                } label: { Image(systemName: "ellipsis").frame(width: 16, height: 24).matteContentShade() }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 20, height: 24).clipped().accessibilityLabel("Placement")
-            }.foregroundStyle(.secondary).padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 9)
-            Rectangle().fill(.white.opacity(0.07)).frame(height: 0.5)
-            }
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(store.visibleBuckets.enumerated()), id: \.element.id) { index, bucket in
                         bucketRows(bucket)
-                            .modifier(DescendingReveal(amount: embedded ? IslandMotion.smooth((motion.progress - 0.35 - Double(index) * 0.12) / 0.30) : 1))
+                            .modifier(DescendingReveal(amount: IslandMotion.smooth((motion.progress - 0.35 - Double(index) * 0.12) / 0.30)))
                     }
                     if store.visibleBuckets.isEmpty {
                         Text(store.refreshing ? "Connecting…" : "Quota unavailable")
@@ -254,12 +176,12 @@ struct PanelView: View {
                     }
                     if store.weeklyHistoryOpen && !store.displayedCreditDates.isEmpty {
                         bankedResets
-                            .modifier(DescendingReveal(amount: embedded ? IslandMotion.smooth((motion.progress - 0.82) / 0.17) : 1))
+                            .modifier(DescendingReveal(amount: IslandMotion.smooth((motion.progress - 0.82) / 0.17)))
                     }
 
                 }.padding(.horizontal, 18).padding(.bottom, 14)
             }
-        }.frame(width: 348, height: store.detailHeight - (embedded ? 78 : 0))
+        }.frame(width: 348, height: store.detailHeight - 78)
     }
     var bankedResets: some View {
         Group {
@@ -307,12 +229,12 @@ struct PanelView: View {
     }
     func bucketRows(_ bucket: LimitBucket) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !embedded || bucket.id != "codex" {
+            if bucket.id != store.provider.rawValue {
             HStack(alignment: .center) {
                 Button { store.selectedID = bucket.id; store.onData?() } label: {
                     HStack(spacing: 6) {
-                        Image(nsImage: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("openai.ico")) ?? NSImage())
-                            .resizable().renderingMode(.template).scaledToFit().frame(width: 13, height: 13).foregroundStyle(.white.opacity(0.8)).accessibilityLabel("OpenAI")
+                        Image(nsImage: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("ProviderIcon-\(store.provider.rawValue).png")) ?? NSImage())
+                            .resizable().renderingMode(.template).scaledToFit().frame(width: 13, height: 13).foregroundStyle(.white.opacity(0.8)).accessibilityLabel(store.provider.displayName)
                         Text(store.quotaTitle(bucket)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.65))
                         if bucket.id == store.provider.rawValue, store.quotaTitle(bucket) != "Compute poor", let plan = bucket.planType { Text(PlanLabel.format(plan)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
                     }
@@ -349,13 +271,13 @@ struct PanelView: View {
                                 .frame(width: store.sourceFresh ? proxy.size.width * window.remaining / 100 : 0)
                         }
                     }.frame(height: 5).matteContentShade(spread: 5)
-                        .opacity(embedded && bucket.id == store.provider.rawValue && window.windowDurationMins == store.sharedFiveHour?.windowDurationMins ? 0 : 1)
-                        .anchorPreference(key: QuotaAnchors.self, value: .bounds) { embedded && bucket.id == store.provider.rawValue && window.windowDurationMins == store.sharedFiveHour?.windowDurationMins ? ["bar": $0] : [:] }
+                        .opacity(bucket.id == store.provider.rawValue && window.windowDurationMins == store.sharedFiveHour?.windowDurationMins ? 0 : 1)
+                        .anchorPreference(key: QuotaAnchors.self, value: .bounds) { bucket.id == store.provider.rawValue && window.windowDurationMins == store.sharedFiveHour?.windowDurationMins ? ["bar": $0] : [:] }
                 }.frame(height: 52)
                     .onTapGesture {
                         if bucket.id == store.provider.rawValue, window.windowDurationMins == 10080 { store.setHistoryOpen(true) }
                     }
-                    .modifier(DescendingReveal(amount: embedded ? IslandMotion.smooth((motion.progress - 0.46 - Double(rowIndex) * 0.10) / 0.28) : 1))
+                    .modifier(DescendingReveal(amount: IslandMotion.smooth((motion.progress - 0.46 - Double(rowIndex) * 0.10) / 0.28)))
                 if bucket.id == store.provider.rawValue, window.windowDurationMins == 10080, store.weeklyHistoryOpen {
                     WeeklyHistoryView(store: store).padding(.top, 8).padding(.bottom, 8)
                         .transition(.opacity.combined(with: .offset(y: -6)))
@@ -373,72 +295,74 @@ struct PanelView: View {
         }
     }
 }
-/// Native menu keeps provider switching accessible without making the notch a key window.
-struct ProviderPicker: View {
+/// Fixed native drawing prevents NSMenu from adopting an image's source dimensions.
+struct ProviderPicker: NSViewRepresentable {
     @ObservedObject var store: UsageStore
-    private var plan: String {
-        store.buckets.first(where: { $0.id == store.provider.rawValue })?.planType.map(PlanLabel.format) ?? store.provider.displayName
-    }
-    var body: some View {
-        Menu {
-            ForEach(UsageProvider.allCases) { provider in
-                Button { store.selectProvider(provider) } label: {
-                    Label(provider.displayName, systemImage: store.provider == provider ? "checkmark" : "circle")
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                if store.provider == .codex {
-                    Image(nsImage: Bundle.main.resourceURL.flatMap { NSImage(contentsOf: $0.appendingPathComponent("openai.ico")) } ?? NSImage())
-                        .resizable().renderingMode(.template).scaledToFit().frame(width: 12, height: 12)
-                } else {
-                    Image(systemName: "sun.max.fill").font(.system(size: 12)).foregroundStyle(Color(red: 0.84, green: 0.57, blue: 0.43))
-                }
-                Text(plan).font(.system(size: 11, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                Image(systemName: "chevron.down").font(.system(size: 7, weight: .semibold))
-            }.foregroundStyle(.white.opacity(0.75)).matteContentShade()
-        }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .frame(width: 65).accessibilityLabel("Provider: \(store.provider.displayName)")
-        .help("Choose Claude or Codex")
+    func makeNSView(context: Context) -> ProviderPickerButton { ProviderPickerButton(store: store) }
+    func updateNSView(_ view: ProviderPickerButton, context: Context) {
+        view.store = store
+        view.setAccessibilityLabel("Provider: \(store.provider.displayName)")
+        view.needsDisplay = true
     }
 }
 
-struct DragSurface: NSViewRepresentable {
+final class ProviderPickerButton: NSButton {
     var store: UsageStore
-    var compact = false
-    func makeNSView(context: Context) -> DragView { let view = DragView(); view.store = store; view.compact = compact; return view }
-    func updateNSView(_ nsView: DragView, context: Context) {}
-}
-final class DragView: NSView {
-    weak var store: UsageStore?
-    var compact = false
-    private var dragOrigin = NSPoint.zero
-    private var mouseOrigin = NSPoint.zero
-    private var moved = false
+    init(store: UsageStore) {
+        self.store = store
+        super.init(frame: NSRect(x: 0, y: 0, width: 65, height: 24))
+        isBordered = false
+        title = ""
+        target = self
+        action = #selector(showProviders)
+        toolTip = "Choose Claude or Codex"
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var intrinsicContentSize: NSSize { NSSize(width: 65, height: 24) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func mouseDown(with event: NSEvent) {
-        guard let window else { return }
-        dragOrigin = window.frame.origin; mouseOrigin = window.convertPoint(toScreen: event.locationInWindow); moved = false
-        store?.isDragging = true
+    private func mark(_ provider: UsageProvider, size: CGFloat) -> NSImage? {
+        guard let url = Bundle.main.url(forResource: "ProviderIcon-" + provider.rawValue, withExtension: "png"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.size = NSSize(width: size, height: size)
+        image.isTemplate = true
+        return image
     }
-    override func mouseDragged(with event: NSEvent) {
-        guard let window else { return }
-        let point = window.convertPoint(toScreen: event.locationInWindow)
-        let dx = point.x - mouseOrigin.x, dy = point.y - mouseOrigin.y
-        if hypot(dx, dy) > 3 { moved = true }
-        if moved { window.setFrameOrigin(NSPoint(x: dragOrigin.x + dx, y: dragOrigin.y + dy)) }
+    override func draw(_ dirtyRect: NSRect) {
+        let center = bounds.midY
+        // Both source marks use the same 100-unit canvas and optical padding.
+        mark(store.provider, size: 16)?.draw(in: NSRect(x: 0, y: center - 8, width: 16, height: 16),
+            from: .zero, operation: .sourceOver, fraction: 0.8, respectFlipped: true, hints: nil)
+        let plan = store.buckets.first(where: { $0.id == store.provider.rawValue })?.planType.map(PlanLabel.format) ?? store.provider.displayName
+        let style = NSMutableParagraphStyle(); style.lineBreakMode = .byTruncatingTail
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.75), .paragraphStyle: style]
+        let text = NSAttributedString(string: plan, attributes: attrs)
+        text.draw(in: NSRect(x: 16, y: center - 7, width: 41, height: 14))
+        NSColor.white.withAlphaComponent(0.55).setStroke()
+        let arrow = NSBezierPath(); arrow.lineWidth = 1
+        arrow.move(to: NSPoint(x: 59, y: center - 1))
+        arrow.line(to: NSPoint(x: 61.5, y: center + 1.5))
+        arrow.line(to: NSPoint(x: 64, y: center - 1)); arrow.stroke()
     }
-    override func mouseUp(with event: NSEvent) {
-        store?.isDragging = false
-        if moved {
-            store?.placement = .floating
-            UserDefaults.standard.set(Placement.floating.rawValue, forKey: "placement")
-            NotificationCenter.default.post(name: .resetPanelDragged, object: window)
-        } else if compact { store?.setExpanded(true) }
+    @objc private func showProviders() {
+        let menu = NSMenu()
+        for provider in UsageProvider.allCases {
+            let item = NSMenuItem(title: provider.displayName, action: #selector(selectProvider(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = provider.rawValue
+            item.image = mark(provider, size: 16)
+            item.state = store.provider == provider ? .on : .off
+            menu.addItem(item)
+        }
+        store.menuTracking = true
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY + 3), in: self)
+        store.menuTracking = false
+    }
+    @objc private func selectProvider(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let provider = UsageProvider(rawValue: raw) else { return }
+        store.selectProvider(provider)
     }
 }
-extension Notification.Name { static let resetPanelDragged = Notification.Name("resetPanelDragged") }
 
 private struct QuotaAnchors: PreferenceKey {
     static var defaultValue: [String: Anchor<CGRect>] = [:]
