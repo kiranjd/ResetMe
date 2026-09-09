@@ -1,6 +1,6 @@
 # ResetMe
 
-Claude and Codex usage, around your Mac’s notch. Free and open source.
+Claude and Codex usage, around your Mac’s notch. Free and open source. [Website](https://kiranjd.github.io/ResetMe/).
 
 https://github.com/user-attachments/assets/2fa4ab63-6ede-4bdb-8131-7210449edc25
 

@@ -20,6 +20,8 @@ The static website needs no build step:
 python3 -m http.server 8774 --directory website
 ```
 
+The public site is https://kiranjd.github.io/ResetMe/. `.github/workflows/pages.yml` deploys only `website/` to GitHub Pages when those files change on `main`, or when manually dispatched. Keep canonical, Open Graph, and sitemap URLs aligned if the public address changes. Project-level `robots.txt` does not override the hosting domain’s root crawler policy.
+
 ## App behavior
 
 Choose Codex or Claude in the panel. The choice is remembered. Quotas refresh every minute, after wake, or with the refresh button. Hover over the notch to expand; click a history day for details; move away to close. The menu-bar and panel menus offer show/hide, Check for Updates, and Quit. Codex can also expose its separate Spark allowance. Only the notch presentation is supported.
