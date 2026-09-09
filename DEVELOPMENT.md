@@ -31,7 +31,7 @@ Choose Codex or Claude in the panel. The choice is remembered. Quotas refresh ev
 - Codex: a short-lived local `codex app-server` process requests `account/rateLimits/read`. Discovery includes installed Codex/ChatGPT desktop CLI bundles. Prefer distinct limit buckets and preserve missing data. Banked resets appear only when reported by Codex.
 - Claude: read an existing Claude Code OAuth sign-in and make a read-only request to `https://api.anthropic.com/api/oauth/usage`. Expired or inaccessible credentials produce an explanation. Do not start login, refresh stored credentials, or change Keychain access rules.
 - Browser-only sessions and API keys do not provide subscription quotas. Do not import browser cookies.
-- Keychain access must not prompt. Switching providers cancels requests, clears the prior data, and ignores late responses, including after switching back.
+- Keychain access must not prompt. A legacy lookup is bounded to two seconds for the caller, with at most one lookup in flight so a wedged security service cannot accumulate threads. Switching providers cancels requests, clears the prior data, and ignores late responses, including after switching back.
 - History extracts usage counters and model identifiers from local session files. Keep provider histories separate; honor custom configuration roots; deduplicate streaming records. Missing days stay unknown.
 - Codex costs are partial API-equivalent estimates for recognized models, not subscription charges. Leave unknown models unpriced. Claude history shows tokens.
 - Local session files may contain private conversation text. Never display, log, commit, or send it. Stored quota samples and preferences remain local.

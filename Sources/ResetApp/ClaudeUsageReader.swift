@@ -17,7 +17,7 @@ enum ClaudeUsageReadError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .credentialsUnavailable:
-            "Open Claude Code and sign in, then try again."
+            "Couldn’t read your Claude Code sign-in. Open Claude Code, then try again."
         case .credentialsMalformed:
             "Claude Code’s saved sign-in couldn’t be read. Run `claude auth status`, then sign in again if needed."
         case .credentialsExpired:
@@ -50,7 +50,8 @@ struct ClaudeUsageReader {
 
     func fetch(environment: [String: String] = ProcessInfo.processInfo.environment) async throws -> ProviderUsageSnapshot {
         try Task.checkCancellation()
-        let token = try ClaudeCredentialReader.accessToken(environment: environment)
+        let token = try await ClaudeCredentialReader.accessToken(environment: environment)
+        try Task.checkCancellation()
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "GET"
         request.timeoutInterval = 25
@@ -110,7 +111,9 @@ struct ClaudeUsageReader {
 }
 
 private enum ClaudeCredentialReader {
-    static func accessToken(environment: [String: String], now: Date = Date()) throws -> String {
+    private static let keychainReadGate = KeychainReadGate()
+
+    static func accessToken(environment: [String: String], now: Date = Date()) async throws -> String {
         let customProfile = environment["CLAUDE_CONFIG_DIR"]?.isEmpty == false
         let fileURL = credentialsURL(environment: environment)
         if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -119,7 +122,7 @@ private enum ClaudeCredentialReader {
         }
         // Claude's global Keychain item belongs only to its default profile.
         guard !customProfile else { throw ClaudeUsageReadError.credentialsUnavailable }
-        guard let data = keychainDataWithoutUI() else { throw ClaudeUsageReadError.credentialsUnavailable }
+        guard let data = await keychainDataWithoutUI() else { throw ClaudeUsageReadError.credentialsUnavailable }
         return try parse(data, now: now)
     }
 
@@ -146,7 +149,22 @@ private enum ClaudeCredentialReader {
         return (secureRoot ?? configRoot).appendingPathComponent(".credentials.json")
     }
 
-    private static func keychainDataWithoutUI() -> Data? {
+    private static func keychainDataWithoutUI(timeout: TimeInterval = 2) async -> Data? {
+        guard keychainReadGate.begin() else { return nil }
+        return await withCheckedContinuation { continuation in
+            let completion = KeychainReadCompletion(continuation: continuation)
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = queryKeychainWithoutUI()
+                keychainReadGate.end()
+                completion.resume(with: result)
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
+                completion.resume(with: nil)
+            }
+        }
+    }
+
+    private static func queryKeychainWithoutUI() -> Data? {
         let context = LAContext()
         context.interactionNotAllowed = true
         let query: [String: Any] = [
@@ -155,9 +173,46 @@ private enum ClaudeCredentialReader {
             kSecMatchLimit as String: kSecMatchLimitOne,
             kSecReturnData as String: true,
             kSecUseAuthenticationContext as String: context,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
         return item as? Data
+    }
+}
+
+private final class KeychainReadGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var inFlight = false
+
+    func begin() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !inFlight else { return false }
+        inFlight = true
+        return true
+    }
+
+    func end() {
+        lock.lock()
+        inFlight = false
+        lock.unlock()
+    }
+}
+
+private final class KeychainReadCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Data?, Never>?
+
+    init(continuation: CheckedContinuation<Data?, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(with result: Data?) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: result)
     }
 }
