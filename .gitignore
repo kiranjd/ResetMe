@@ -1,0 +1,21 @@
+# Swift Package Manager
+/.build/
+/.swiftpm/
+
+# Local app and release output
+/dist/
+/work/
+/outputs/
+/captures/
+/recordings/
+
+# Local configuration and credentials
+/.env
+/.env.*
+!/.env.example
+/.private/
+
+# macOS and Xcode user state
+.DS_Store
+DerivedData/
+*.xcuserstate
