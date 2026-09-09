@@ -87,6 +87,7 @@ import ResetCore
     func selectProvider(_ value: UsageProvider) {
         guard provider != value else { return }
         stopRequest()
+        usageRevealTask?.cancel(); recentUsageChange = false
         provider = value
         UserDefaults.standard.set(value.rawValue, forKey: "usageProvider")
         buckets = []; credits = nil; selectedID = value.rawValue
@@ -112,6 +113,26 @@ import ResetCore
         set { motion.progress = newValue }
     }
     @Published var indicatorHidden = false
+    let visibilitySettings = VisibilitySettings.shared
+    private var recentUsageChange = false
+    private var usageRevealTask: Task<Void, Never>?
+    var indicatorRevealed: Bool {
+        IndicatorVisibility.shouldShow(alwaysOn: visibilitySettings.alwaysOn,
+            hovered: !hoveredRegions.isEmpty, expanded: expanded || islandProgress > 0.001,
+            recentChange: visibilitySettings.revealChanges && recentUsageChange,
+            activeAppSelected: visibilitySettings.activeAppSelected)
+    }
+    private func revealUsageChange() {
+        recentUsageChange = true
+        usageRevealTask?.cancel()
+        onVisibility?()
+        usageRevealTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.recentUsageChange = false
+            self.onVisibility?()
+        }
+    }
     @Published var samples: [UsageSample] = []
     @Published var hasNotch = false
     @Published var notchSize = CGSize(width: 210, height: 40)
@@ -154,6 +175,7 @@ import ResetCore
         return UsageMath.pointsPerHour(samples: samples.filter { now.timeIntervalSince($0.timestamp) <= 3600 }, bucketID: selected.id, resetAt: window.resetsAt)
     }
     init() {
+        visibilitySettings.onChange = { [weak self] in self?.onVisibility?() }
         if let data = UserDefaults.standard.data(forKey: "usageSamples"), let stored = try? JSONDecoder().decode([UsageSample].self, from: data) {
             samples = stored.filter { Date().timeIntervalSince($0.timestamp) < 86400 }
         }
@@ -161,7 +183,9 @@ import ResetCore
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.refresh() } }
     }
     func hover(_ inside: Bool, region: String = "panel") {
+        let wasHovered = !hoveredRegions.isEmpty
         if inside { hoveredRegions.insert(region) } else { hoveredRegions.remove(region) }
+        if wasHovered != !hoveredRegions.isEmpty { onVisibility?() }
         guard !menuTracking else { return }
         let shouldOpen = !hoveredRegions.isEmpty
         guard shouldOpen != hoverIntent || (hoverTask == nil && expanded != shouldOpen) else { return }
@@ -300,7 +324,9 @@ import ResetCore
     private func accept(_ snapshot: ProviderUsageSnapshot) {
         guard snapshot.provider == provider else { return }
         retryNotBefore[provider] = nil
+        let changed = IndicatorVisibility.usageChanged(from: buckets, to: snapshot.buckets)
         buckets = snapshot.buckets; credits = snapshot.credits
+        if changed { revealUsageChange() }
         lastUpdated = Date(); now = Date(); error = nil
         if !buckets.contains(where: { $0.id == selectedID }) { selectedID = buckets.first?.id ?? provider.rawValue }
         samples = samples.filter { now.timeIntervalSince($0.timestamp) < 86400 }
@@ -317,5 +343,5 @@ import ResetCore
         if let process, process.isRunning { process.terminate() }
         process = nil; input = nil; output = nil; refreshing = false
     }
-    func shutdown() { tick?.invalidate(); refreshTimer?.invalidate(); stopRequest() }
+    func shutdown() { usageRevealTask?.cancel(); hoverTask?.cancel(); sensorStartTask?.cancel(); tick?.invalidate(); refreshTimer?.invalidate(); stopRequest() }
 }

@@ -32,6 +32,10 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     var pointerMonitor: Any?
     var localPointerMonitor: Any?
     var visibilityItem: NSMenuItem?
+    var alwaysOnItem: NSMenuItem?
+    var activeAppItem: NSMenuItem?
+    var menuActiveApp: VisibilityApp?
+    var indicatorAlphaTarget: CGFloat = -1
     let notchAnimator = NotchAnimator()
     var lastPointer = NSEvent.mouseLocation
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -51,6 +55,7 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
             guard let self else { return }
             self.store.islandProgress = progress
             self.updateNotchInteractivity()
+            self.updateIndicatorAppearance()
         }
         store.onExpand = { [weak self] _ in self?.resize() }
         store.onData = { [weak self] in self?.resize(animated: false) }
@@ -78,11 +83,17 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         let menu = NSMenu(); menu.delegate = self
         let visibility = NSMenuItem(title: "Hide ResetMe", action: #selector(toggleVisibility), keyEquivalent: "")
         visibility.target = self; menu.addItem(visibility); visibilityItem = visibility
+        let always = NSMenuItem(title: "Always on", action: #selector(toggleAlwaysOn), keyEquivalent: "")
+        always.target = self; menu.addItem(always); alwaysOnItem = always
+        let active = NSMenuItem(title: "Show while this app is active", action: #selector(toggleActiveApp), keyEquivalent: "")
+        active.target = self; menu.addItem(active); activeAppItem = active
+        item("Settings…", action: #selector(showSettings), menu: menu)
         item("Check for Updates…", action: #selector(checkForUpdates), menu: menu)
         menu.addItem(.separator())
         item("Quit ResetMe", action: #selector(quit), menu: menu)
         statusItem.menu = menu
         place(); store.refresh()
+        if CommandLine.arguments.contains("--settings") { showSettings() }
         if CommandLine.arguments.contains("--tune-reflections") { SceneSettings.shared.applyReflectionTune() }
         if CommandLine.arguments.contains("--hanging-light") {
             SceneSettings.shared.set("faceReflection", 0.35)
@@ -131,7 +142,16 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     }
     func updateNotchInteractivity() {
         // Transparent canvas must never block the editor or menu items behind it.
-        notchPanel.ignoresMouseEvents = !(visibleNotchFrame?.contains(lastPointer) ?? false)
+        notchPanel.ignoresMouseEvents = store.indicatorHidden || !store.indicatorRevealed || !(visibleNotchFrame?.contains(lastPointer) ?? false)
+    }
+    func updateIndicatorAppearance() {
+        let target: CGFloat = store.indicatorRevealed ? 1 : 0
+        guard indicatorAlphaTarget != target else { return }
+        indicatorAlphaTarget = target
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.18
+            notchPanel.animator().alphaValue = target
+        }
     }
     func resize(animated: Bool = true) {
         guard notchPanel != nil else { return }
@@ -140,12 +160,29 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         }
         let shouldAnimate = (animated || notchAnimator.isRunning) && notchPanel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         notchAnimator.move(to: store.expanded ? 1 : 0, animated: shouldAnimate)
+        updateIndicatorAppearance()
+        updateNotchInteractivity()
         notchPanel.orderFrontRegardless()
     }
     func menuNeedsUpdate(_ menu: NSMenu) {
+        alwaysOnItem?.state = store.visibilitySettings.alwaysOn ? .on : .off
+        menuActiveApp = NSWorkspace.shared.frontmostApplication?.bundleURL.flatMap(VisibilityApp.init)
+        if menuActiveApp?.id == Bundle.main.bundleIdentifier { menuActiveApp = nil }
+        activeAppItem?.title = menuActiveApp.map { "Show while \($0.name) is active" } ?? "Show while this app is active"
+        activeAppItem?.isEnabled = menuActiveApp != nil
+        activeAppItem?.state = menuActiveApp.map { store.visibilitySettings.useActiveApps && store.visibilitySettings.selected.contains($0.id) } == true ? .on : .off
         visibilityItem?.title = store.hasNotch ? (store.indicatorHidden ? "Show ResetMe" : "Hide ResetMe") : "Notched display unavailable"
         visibilityItem?.isEnabled = store.hasNotch
     }
+    @objc func toggleAlwaysOn() { store.visibilitySettings.alwaysOn.toggle() }
+    @objc func toggleActiveApp() {
+        guard let app = menuActiveApp else { return }
+        let enabled = !(store.visibilitySettings.useActiveApps && store.visibilitySettings.selected.contains(app.id))
+        store.visibilitySettings.setSelected(app, enabled: enabled)
+        if enabled { store.visibilitySettings.useActiveApps = true }
+        store.visibilitySettings.discover()
+    }
+    @objc func showSettings() { store.dismiss(); store.visibilitySettings.show() }
     @objc func toggleVisibility() { store.toggleIndicator() }
     @objc func checkForUpdates() { AppUpdater.shared.checkForUpdates() }
     @objc func quit() { NSApp.terminate(nil) }
@@ -155,6 +192,10 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         notchAnimator.stop()
         if let pointerMonitor { NSEvent.removeMonitor(pointerMonitor) }
         if let localPointerMonitor { NSEvent.removeMonitor(localPointerMonitor) }
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showSettings()
+        return true
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }

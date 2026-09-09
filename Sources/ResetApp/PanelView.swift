@@ -55,6 +55,7 @@ struct IslandView: View {
                             .accessibilityLabel("Refresh usage").help(store.freshness)
                         Menu {
                             Button(store.indicatorHidden ? "Show ResetMe" : "Hide ResetMe") { store.toggleIndicator() }
+                            Button("Settings…") { store.dismiss(); store.visibilitySettings.show() }
                             Button("Check for Updates…") { AppUpdater.shared.checkForUpdates() }
                             Divider()
                             if store.provider == .codex { Toggle("Enable Spark", isOn: Binding(get: { store.sparkEnabled }, set: { store.setSparkEnabled($0) })) }
