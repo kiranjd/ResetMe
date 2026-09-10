@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-public struct TokenDay: Identifiable, Sendable {
+public struct TokenDay: Identifiable, Codable, Sendable {
     public var date: Date
     public var tokens: Int?
     public var id: Date { date }
@@ -18,6 +18,11 @@ public struct TokenDay: Identifiable, Sendable {
     public var cost: Double? { pricedTokens > 0 ? inputCost + cachedCost + outputCost : nil }
     public var uncached: Int { max(0, input - cached) }
 }
+public struct TokenHistorySnapshot: Sendable {
+    public var days: [TokenDay]
+    public var quotaObservations: [QuotaObservation]
+}
+
 public enum TokenHistory {
     public static func defaultRoot(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -37,6 +42,11 @@ public enum TokenHistory {
     }
 
     public static func days(root: URL, now: Date = Date(), calendar: Calendar = .current, dayCount: Int = 7) -> [TokenDay] {
+        read(root: root, now: now, calendar: calendar, dayCount: dayCount).days
+    }
+
+    public static func read(root: URL, now: Date = Date(), calendar: Calendar = .current, dayCount: Int = 7) -> TokenHistorySnapshot {
+        var observations: [QuotaObservation] = []
         let start = calendar.date(byAdding: .day, value: -(max(1, dayCount) - 1), to: calendar.startOfDay(for: now))!
         var totals: [Date: TokenDay] = [:]
         let formatter = ISO8601DateFormatter()
@@ -56,9 +66,14 @@ public enum TokenHistory {
                       let payload = obj["payload"] as? [String: Any] else { return }
                 if obj["type"] as? String == "turn_context" { model = payload["model"] as? String; return }
                 guard obj["type"] as? String == "event_msg", payload["type"] as? String == "token_count",
-                      let info = payload["info"] as? [String: Any], let usage = info["total_token_usage"] as? [String: Int],
-                      let total = usage["total_tokens"], let stamp = obj["timestamp"] as? String,
+                      let stamp = obj["timestamp"] as? String,
                       let date = formatter.date(from: stamp) ?? plain.date(from: stamp) else { return }
+                if date >= start.addingTimeInterval(-8 * 86400), date <= now,
+                   let limits = payload["rate_limits"] as? [String: Any] {
+                    observations.append(contentsOf: QuotaObservation.codexRecord(limits, at: date))
+                }
+                guard let info = payload["info"] as? [String: Any], let usage = info["total_token_usage"] as? [String: Int],
+                      let total = usage["total_tokens"] else { return }
                 let last = info["last_token_usage"] as? [String: Int] ?? [:]
                 let old = previous; previous = usage
                 let reset = old == nil || total < (old?["total_tokens"] ?? 0)
@@ -103,9 +118,10 @@ public enum TokenHistory {
                 consume(Data(bytesNoCopy: line, count: count, deallocator: .none))
             }
         }
-        return (0..<max(1, dayCount)).map { offset in
+        let days = (0..<max(1, dayCount)).map { offset in
             let date = calendar.date(byAdding: .day, value: offset, to: start)!
             return totals[date] ?? TokenDay(date: date, tokens: nil)
         }
+        return TokenHistorySnapshot(days: days, quotaObservations: observations)
     }
 }

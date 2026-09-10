@@ -7,6 +7,7 @@ struct HistoryHoverPanel: NSViewRepresentable {
     var point: CGPoint?
     var content: AnyView?
     var cardHeight: CGFloat = 82
+    var cardWidth: CGFloat = 140
     var docking = false
     var dockFrame: CGRect?
     var onDocked: () -> Void = {}
@@ -46,7 +47,7 @@ struct HistoryHoverPanel: NSViewRepresentable {
             } completionHandler: { onDocked() }
             return
         }
-        coordinator.host.rootView = AnyView(content.frame(width: 140, height: cardHeight, alignment: .top).preferredColorScheme(.dark))
+        coordinator.host.rootView = AnyView(content.frame(width: cardWidth, height: cardHeight, alignment: .top).preferredColorScheme(.dark))
         let size = coordinator.host.fittingSize
         let local = NSPoint(x: point.x, y: view.bounds.height - point.y)
         let anchor = window.convertPoint(toScreen: view.convert(local, to: nil))

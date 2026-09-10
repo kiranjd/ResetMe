@@ -32,8 +32,23 @@ import ResetCore
     @Published var historyLoading = false
     private var historyHoverTask: Task<Void, Never>?
     private var historyLoadedAt: Date?
+    private var historyLastStartedAt: Date?
     private var historyLoadedProvider: UsageProvider?
     private var historyGeneration = UUID()
+    private var historyTask: Task<Void, Never>?
+    private var shuttingDown = false
+    private var historyRoots: [String] {
+        switch provider {
+        case .codex: [TokenHistory.defaultRoot().standardizedFileURL.path]
+        case .claude: ClaudeTokenHistory.defaultRoots().map { $0.standardizedFileURL.path }
+        }
+    }
+    private func restoreHistoryCache() {
+        guard let data = UserDefaults.standard.data(forKey: "tokenHistoryCache.\(provider.rawValue)"),
+              let cache = try? JSONDecoder().decode(TokenHistoryCache.self, from: data),
+              cache.provider == provider, cache.roots == historyRoots else { return }
+        tokenDays = cache.displayDays()
+    }
     func hoverWeekly(_ inside: Bool) {
         historyHoverTask?.cancel()
         guard inside, !weeklyHistoryOpen else { return }
@@ -47,24 +62,44 @@ import ResetCore
         guard weeklyHistoryOpen != open else { return }
         withAnimation(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.88)) { weeklyHistoryOpen = open }
         onData?()
-        guard open, !historyLoading,
-              !(historyLoadedProvider == provider && historyLoadedAt.map({ Date().timeIntervalSince($0) < 60 }) == true)
+    }
+    /// Hover only reveals existing data. One background scan serves launch, refresh,
+    /// wake and provider changes, while cached rows remain on screen.
+    private func refreshHistory(force: Bool = false) {
+        guard !shuttingDown, historyTask == nil,
+              force ||
+              !(historyLoadedProvider == provider && historyLastStartedAt.map({ Date().timeIntervalSince($0) < 55 }) == true)
         else { return }
         historyLoading = true
+        historyLastStartedAt = Date()
         let requestedProvider = provider
         let requestedGeneration = historyGeneration
-        Task { @MainActor in
-            let days = await Task.detached(priority: .utility) {
+        let roots = historyRoots
+        historyTask = Task { @MainActor [weak self] in
+            let history = await Task.detached(priority: .background) { () -> (days: [TokenDay], resets: [QuotaResetEvent]) in
                 switch requestedProvider {
                 case .codex:
-                    let root = TokenHistory.defaultRoot()
-                    return TokenHistory.days(root: root, dayCount: 14)
+                    let root = URL(fileURLWithPath: roots[0])
+                    let result = TokenHistory.read(root: root, dayCount: 14)
+                    return (result.days, ResetHistory.recovered(from: result.quotaObservations))
                 case .claude:
-                    return ClaudeTokenHistory.days(roots: ClaudeTokenHistory.defaultRoots(), dayCount: 14)
+                    return (ClaudeTokenHistory.days(roots: roots.map { URL(fileURLWithPath: $0) }, dayCount: 14), [])
                 }
             }.value
-            guard provider == requestedProvider, historyGeneration == requestedGeneration else { return }
-            tokenDays = days; historyLoading = false; historyLoadedAt = Date(); historyLoadedProvider = requestedProvider
+            guard let self, !self.shuttingDown, !Task.isCancelled else { return }
+            self.historyTask = nil
+            guard self.provider == requestedProvider, self.historyGeneration == requestedGeneration else {
+                self.historyLoading = false
+                self.refreshHistory(force: true)
+                return
+            }
+            resetHistory.merge(history.resets); saveResetHistory()
+            tokenDays = history.days; historyLoading = false; historyLoadedAt = Date(); historyLoadedProvider = requestedProvider
+            let cache = TokenHistoryCache(provider: requestedProvider, roots: roots, days: history.days)
+            if let data = try? JSONEncoder().encode(cache) {
+                UserDefaults.standard.set(data, forKey: "tokenHistoryCache.\(requestedProvider.rawValue)")
+            }
+            onData?()
         }
     }
     @Published var provider = UsageProvider(rawValue: UserDefaults.standard.string(forKey: "usageProvider") ?? "codex") ?? .codex
@@ -94,6 +129,7 @@ import ResetCore
         lastUpdated = nil; error = nil
         tokenDays = []; historyLoadedAt = nil; historyLoadedProvider = nil; historyLoading = false
         historyGeneration = UUID()
+        restoreHistoryCache()
         onData?()
         refresh()
     }
@@ -134,6 +170,12 @@ import ResetCore
         }
     }
     @Published var samples: [UsageSample] = []
+    @Published private(set) var resetHistory = ResetHistory()
+    private func saveResetHistory() {
+        if let data = try? JSONEncoder().encode(resetHistory) {
+            UserDefaults.standard.set(data, forKey: "quotaResetHistoryV1")
+        }
+    }
     @Published var hasNotch = false
     @Published var notchSize = CGSize(width: 210, height: 40)
     var onExpand: ((Bool) -> Void)?
@@ -179,8 +221,25 @@ import ResetCore
         if let data = UserDefaults.standard.data(forKey: "usageSamples"), let stored = try? JSONDecoder().decode([UsageSample].self, from: data) {
             samples = stored.filter { Date().timeIntervalSince($0.timestamp) < 86400 }
         }
+        if let data = UserDefaults.standard.data(forKey: "quotaResetHistoryV1"),
+           let saved = try? JSONDecoder().decode(ResetHistory.self, from: data) {
+            resetHistory = saved
+        } else {
+            // Migrate only windows whose duration is known; the old pace samples
+            // could represent either allowance and are unsuitable as reset evidence.
+            let weekly = samples.filter { $0.bucketID.hasSuffix(":weekly") }.map { sample in
+                let bucket = String(sample.bucketID.dropLast(7))
+                let provider: UsageProvider = bucket.hasPrefix("claude") ? .claude : .codex
+                return QuotaObservation(provider: provider, bucketID: bucket, bucketName: provider.displayName,
+                    durationMinutes: 10_080, used: sample.used, resetsAt: sample.resetAt,
+                    timestamp: sample.timestamp, source: .codexHistory)
+            }
+            resetHistory.observe(weekly); saveResetHistory()
+        }
         tick = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { @MainActor in self?.now = Date() } }
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.refresh() } }
+        restoreHistoryCache()
+        refreshHistory(force: true)
     }
     func hover(_ inside: Bool, region: String = "panel") {
         let wasHovered = !hoveredRegions.isEmpty
@@ -233,6 +292,7 @@ import ResetCore
         return "\(max(1, seconds / 60))m"
     }
     func refresh() {
+        refreshHistory()
         guard !refreshing else { return }
         if let retryAt = retryNotBefore[provider], retryAt > Date() {
             if provider == .claude {
@@ -324,6 +384,7 @@ import ResetCore
     private func accept(_ snapshot: ProviderUsageSnapshot) {
         guard snapshot.provider == provider else { return }
         retryNotBefore[provider] = nil
+        resetHistory.observe(QuotaObservation.snapshot(snapshot, at: Date())); saveResetHistory()
         let changed = IndicatorVisibility.usageChanged(from: buckets, to: snapshot.buckets)
         buckets = snapshot.buckets; credits = snapshot.credits
         if changed { revealUsageChange() }
@@ -343,5 +404,5 @@ import ResetCore
         if let process, process.isRunning { process.terminate() }
         process = nil; input = nil; output = nil; refreshing = false
     }
-    func shutdown() { usageRevealTask?.cancel(); hoverTask?.cancel(); sensorStartTask?.cancel(); tick?.invalidate(); refreshTimer?.invalidate(); stopRequest() }
+    func shutdown() { shuttingDown = true; historyTask?.cancel(); usageRevealTask?.cancel(); hoverTask?.cancel(); sensorStartTask?.cancel(); tick?.invalidate(); refreshTimer?.invalidate(); stopRequest() }
 }

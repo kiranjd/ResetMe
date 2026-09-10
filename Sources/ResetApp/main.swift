@@ -32,6 +32,7 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     var pointerMonitor: Any?
     var localPointerMonitor: Any?
     var visibilityItem: NSMenuItem?
+    var menuBarItem: NSMenuItem?
     var alwaysOnItem: NSMenuItem?
     var activeAppItem: NSMenuItem?
     var menuActiveApp: VisibilityApp?
@@ -82,16 +83,37 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         statusItem.button?.toolTip = "ResetMe"
         let menu = NSMenu(); menu.delegate = self
         let visibility = NSMenuItem(title: "Hide ResetMe", action: #selector(toggleVisibility), keyEquivalent: "")
-        visibility.target = self; menu.addItem(visibility); visibilityItem = visibility
-        let always = NSMenuItem(title: "Always on", action: #selector(toggleAlwaysOn), keyEquivalent: "")
+        visibility.target = self; visibility.image = menuIcon("eye.slash"); menu.addItem(visibility); visibilityItem = visibility
+        menu.addItem(.separator())
+        let always = NSMenuItem(title: "Keep notch visible", action: #selector(toggleAlwaysOn), keyEquivalent: "")
         always.target = self; menu.addItem(always); alwaysOnItem = always
         let active = NSMenuItem(title: "Show while this app is active", action: #selector(toggleActiveApp), keyEquivalent: "")
         active.target = self; menu.addItem(active); activeAppItem = active
-        item("Settings…", action: #selector(showSettings), menu: menu)
-        item("Check for Updates…", action: #selector(checkForUpdates), menu: menu)
         menu.addItem(.separator())
-        item("Quit ResetMe", action: #selector(quit), menu: menu)
+        let menuBar = NSMenuItem(title: "Show in menu bar", action: #selector(toggleMenuBar), keyEquivalent: "")
+        menuBar.target = self; menu.addItem(menuBar); menuBarItem = menuBar
+        menu.addItem(.separator())
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let versionItem = NSMenuItem(title: "ResetMe \(version)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        item("Settings…", action: #selector(showSettings), menu: menu, symbol: "gearshape")
+        item("Check for Updates…", action: #selector(checkForUpdates), menu: menu, symbol: "arrow.triangle.2.circlepath")
+        menu.addItem(.separator())
+        item("Quit ResetMe", action: #selector(quit), menu: menu, symbol: "power")
+        // Reserve the same icon column in every section, including checkable rows.
+        for entry in menu.items where !entry.isSeparatorItem {
+            if entry.image == nil {
+                entry.image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in true }
+            }
+            entry.image?.size = NSSize(width: 16, height: 16)
+        }
         statusItem.menu = menu
+        statusItem.isVisible = store.visibilitySettings.showInMenuBar
+        store.visibilitySettings.onMenuBarChange = { [weak self] in
+            guard let self else { return }
+            self.statusItem.isVisible = self.store.visibilitySettings.showInMenuBar
+        }
         place(); store.refresh()
         if CommandLine.arguments.contains("--settings") { showSettings() }
         if CommandLine.arguments.contains("--tune-reflections") { SceneSettings.shared.applyReflectionTune() }
@@ -111,8 +133,15 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         window.acceptsMouseMovedEvents = true; window.isReleasedWhenClosed = false
         return window
     }
-    func item(_ title: String, action: Selector, menu: NSMenu) {
-        let entry = NSMenuItem(title: title, action: action, keyEquivalent: ""); entry.target = self; menu.addItem(entry)
+    func menuIcon(_ symbol: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+        image?.size = NSSize(width: 16, height: 16)
+        image?.isTemplate = true
+        return image
+    }
+    func item(_ title: String, action: Selector, menu: NSMenu, symbol: String? = nil) {
+        let entry = NSMenuItem(title: title, action: action, keyEquivalent: ""); entry.target = self; entry.image = symbol.flatMap(menuIcon); menu.addItem(entry)
     }
     func targetScreen() -> NSScreen {
         if let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 && $0.auxiliaryTopLeftArea != nil }) { return screen }
@@ -165,15 +194,19 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         notchPanel.orderFrontRegardless()
     }
     func menuNeedsUpdate(_ menu: NSMenu) {
+        menuBarItem?.state = store.visibilitySettings.showInMenuBar ? .on : .off
         alwaysOnItem?.state = store.visibilitySettings.alwaysOn ? .on : .off
         menuActiveApp = NSWorkspace.shared.frontmostApplication?.bundleURL.flatMap(VisibilityApp.init)
         if menuActiveApp?.id == Bundle.main.bundleIdentifier { menuActiveApp = nil }
-        activeAppItem?.title = menuActiveApp.map { "Show while \($0.name) is active" } ?? "Show while this app is active"
+        activeAppItem?.title = menuActiveApp.map { "Show with \($0.name)" } ?? "Show with active app"
         activeAppItem?.isEnabled = menuActiveApp != nil
         activeAppItem?.state = menuActiveApp.map { store.visibilitySettings.useActiveApps && store.visibilitySettings.selected.contains($0.id) } == true ? .on : .off
-        visibilityItem?.title = store.hasNotch ? (store.indicatorHidden ? "Show ResetMe" : "Hide ResetMe") : "Notched display unavailable"
+        visibilityItem?.title = store.hasNotch ? (store.indicatorHidden ? "Show notch" : "Hide notch") : "Notched display unavailable"
+        visibilityItem?.image = menuIcon(store.indicatorHidden ? "eye" : "eye.slash")
+        activeAppItem?.toolTip = "Keep the notch visible while this app is in the foreground."
         visibilityItem?.isEnabled = store.hasNotch
     }
+    @objc func toggleMenuBar() { store.visibilitySettings.showInMenuBar.toggle() }
     @objc func toggleAlwaysOn() { store.visibilitySettings.alwaysOn.toggle() }
     @objc func toggleActiveApp() {
         guard let app = menuActiveApp else { return }

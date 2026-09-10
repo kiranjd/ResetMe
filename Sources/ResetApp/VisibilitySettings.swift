@@ -18,6 +18,8 @@ struct VisibilityApp: Codable, Identifiable {
 
 @MainActor final class VisibilitySettings: ObservableObject {
     static let shared = VisibilitySettings()
+    @Published var showInMenuBar: Bool { didSet { defaults.set(showInMenuBar, forKey: "showInMenuBar"); onMenuBarChange?() } }
+    var onMenuBarChange: (() -> Void)?
     @Published var alwaysOn: Bool { didSet { defaults.set(alwaysOn, forKey: "visibilityAlwaysOn"); onChange?() } }
     @Published var revealChanges: Bool { didSet { defaults.set(revealChanges, forKey: "visibilityRevealChanges"); onChange?() } }
     @Published var useActiveApps: Bool { didSet { defaults.set(useActiveApps, forKey: "visibilityUseActiveApps"); onChange?() } }
@@ -30,6 +32,7 @@ struct VisibilityApp: Codable, Identifiable {
     private var window: NSWindow?
     private var savedApps: [VisibilityApp] = []
     init() {
+        showInMenuBar = UserDefaults.standard.object(forKey: "showInMenuBar") as? Bool ?? true
         alwaysOn = UserDefaults.standard.bool(forKey: "visibilityAlwaysOn")
         revealChanges = UserDefaults.standard.object(forKey: "visibilityRevealChanges") as? Bool ?? true
         useActiveApps = UserDefaults.standard.object(forKey: "visibilityUseActiveApps") as? Bool ?? true
@@ -100,6 +103,8 @@ struct VisibilitySettingsView: View {
     @State private var search = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Toggle("Show in menu bar", isOn: $settings.showInMenuBar)
+            Divider()
             Text("Notch visibility").font(.title2.weight(.semibold))
             Toggle("Always on", isOn: $settings.alwaysOn)
             Text("Hover over the notch to open ResetMe anytime.").font(.callout).foregroundStyle(.secondary)
