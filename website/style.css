@@ -11,6 +11,6 @@ header{position:relative;height:128px;padding-top:24px}
 .hero{padding-top:18px;padding-bottom:52px}
 .second{padding-bottom:52px}
 .get{padding-bottom:45px}
-.video-wrap{aspect-ratio:1000/920}
+.video-wrap{aspect-ratio:1114/720}
 @media(max-width:600px){header{height:122px;padding-top:35px}.site-notch{width:210px;height:35.6px}.site-notch img{width:406.3px;left:-127.8px}.hero{padding-top:15px;gap:38px}.product{width:90%;max-width:335px}.second{padding-bottom:35px}.get{padding-bottom:35px}}
 @media(prefers-reduced-motion:reduce){.site-notch{transition:none}}
