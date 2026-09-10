@@ -129,6 +129,6 @@ struct VisibilitySettingsView: View {
                     }
                 }.padding(8)
             }.background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-        }.padding(24).frame(width: 440, height: 560)
+        }.padding(24).frame(width: 440, height: 560).tint(BrandPalette.olive)
     }
 }

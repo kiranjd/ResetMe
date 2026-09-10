@@ -84,6 +84,19 @@ final class SceneSettings: ObservableObject {
         self.defaults = defaults
         values = defaults.dictionary(forKey: Self.storageKey)?.compactMapValues { ($0 as? NSNumber)?.doubleValue } ?? [:]
         values = values.filter { $0.value.isFinite }
+        // Replace the earlier color experiment once, preserving scalar tuning and
+        // a recoverable copy of the old colors. Later color edits remain respected.
+        if !defaults.bool(forKey: "leafPalette.v1") {
+            let colorKeys = Set(["bar", "dot", "accent", "background", "reset"].flatMap { prefix in
+                ["R", "G", "B"].map { prefix + $0 }
+            })
+            let previous = values.filter { colorKeys.contains($0.key) }
+            if !previous.isEmpty { defaults.set(previous, forKey: "opticalScene.beforeLeafPalette.v1") }
+            values = values.filter { !colorKeys.contains($0.key) }
+            defaults.set(values, forKey: Self.storageKey)
+            defaults.set(true, forKey: "leafPalette.v1")
+        }
+
         if !defaults.bool(forKey: "softHangingLight.v1") {
             for (key, factor) in [("dotOpacity", 0.75), ("dotReflection", 0.65), ("barReflection", 0.8), ("faceReflection", 0.8)] {
                 let baseline = values[key] ?? Self.parameters.first(where: { $0.id == key })!.initial
@@ -136,15 +149,15 @@ final class SceneSettings: ObservableObject {
         replace(next)
     }
     func rgb(_ name: String) -> [Double] {
-        let base: [Double]
+        let hex: Int
         switch name {
-        case "bar": base = [0.48, 0.29, 0.17]
-        case "dot": base = [0.957, 0.976, 1]
-        case "accent": base = [0.86, 0.52, 0.30]
-        case "background": base = [0.065, 0.065, 0.065]
-        case "reset": base = [0.25, 0.78, 0.47]
-        default: base = [1, 1, 1]
+        case "bar": hex = 0x606c38
+        case "dot", "accent": hex = 0xfefae0
+        case "background": hex = 0x283618
+        case "reset": hex = 0xdda15e
+        default: hex = 0xfefae0
         }
+        let base = [Double((hex >> 16) & 255) / 255, Double((hex >> 8) & 255) / 255, Double(hex & 255) / 255]
         return zip(["R", "G", "B"], base).map { min(1, max(0, values[name+$0.0] ?? $0.1)) }
     }
     func color(_ name: String) -> Color { let c = rgb(name); return Color(.sRGB, red: c[0], green: c[1], blue: c[2]) }

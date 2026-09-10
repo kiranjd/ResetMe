@@ -141,9 +141,9 @@ final class MatteSurfaceView: NSView {
             NSColor(srgbRed: min(1, backgroundColor[0]*brightness*factor), green: min(1, backgroundColor[1]*brightness*factor), blue: min(1, backgroundColor[2]*brightness*factor), alpha: 1)
         })?.draw(in: bounds, angle: 55)
         // Broad low-contrast material shading, not a glass slab.
-        NSGradient(starting: NSColor(red: 0.30, green: 0.20, blue: 0.14, alpha: settings["warmth"]), ending: .clear)?.draw(in: NSRect(x: -100, y: -90, width: bounds.width + 140, height: 310), relativeCenterPosition: .zero)
+        NSGradient(starting: NSColor(red: 96.0/255, green: 108.0/255, blue: 56.0/255, alpha: settings["warmth"]), ending: .clear)?.draw(in: NSRect(x: -100, y: -90, width: bounds.width + 140, height: 310), relativeCenterPosition: .zero)
         if presence > 0.005 {
-            NSGradient(colors: [NSColor(white: 1, alpha: settings["glow"] * presence), NSColor(red: 1, green: 0.64, blue: 0.36, alpha: settings["glow"] * presence), .clear])?.draw(in: NSRect(x: cursor.x - 95, y: cursor.y - 32, width: 190, height: 64), relativeCenterPosition: .zero)
+            NSGradient(colors: [NSColor(white: 1, alpha: settings["glow"] * presence), NSColor(red: 221.0/255, green: 161.0/255, blue: 94.0/255, alpha: settings["glow"] * presence), .clear])?.draw(in: NSRect(x: cursor.x - 95, y: cursor.y - 32, width: 190, height: 64), relativeCenterPosition: .zero)
             NSGradient(starting: NSColor(white: 1, alpha: settings["streak"] * presence), ending: .clear)?.draw(in: NSRect(x: cursor.x - 40, y: cursor.y - 4, width: 80, height: 8), relativeCenterPosition: .zero)
         }
         let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || settings["dotMotion"] < 0.5

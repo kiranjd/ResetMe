@@ -40,6 +40,9 @@ install -m 644 "$project_dir/Assets/openai.ico" "$staging/Contents/Resources/ope
 for provider in codex claude; do
     install -m 644 "$project_dir/Assets/ProviderIcon-$provider.png" "$staging/Contents/Resources/ProviderIcon-$provider.png"
 done
+for image in LeafTemplate.png LeafTemplate@2x.png; do
+    install -m 644 "$project_dir/Assets/Brand/$image" "$staging/Contents/Resources/$image"
+done
 install -m 644 "$project_dir/Assets/ResetMe.icns" "$staging/Contents/Resources/ResetMe.icns"
 install -m 644 "$project_dir/THIRD_PARTY_NOTICES.md" "$staging/Contents/Resources/THIRD_PARTY_NOTICES.md"
 install -m 644 "$project_dir/Licenses/Sparkle-LICENSE" "$staging/Contents/Resources/Sparkle-LICENSE"

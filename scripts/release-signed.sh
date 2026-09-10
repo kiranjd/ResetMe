@@ -52,8 +52,7 @@ if ! security find-identity -v -p codesigning | grep -Fq "\"$sign_identity\""; t
     exit 69
 fi
 
-readonly notary_account="com.apple.gke.notary.tool.saved-creds.$notary_profile"
-if ! security find-generic-password -a "$notary_account" >/dev/null 2>&1; then
+if ! xcrun notarytool history --keychain-profile "$notary_profile" --output-format json >/dev/null 2>&1; then
     print -u2 -r -- "Notarytool profile is unavailable: $notary_profile"
     exit 69
 fi

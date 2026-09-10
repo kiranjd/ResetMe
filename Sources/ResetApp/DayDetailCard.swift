@@ -35,7 +35,7 @@ struct DayDetailCard: View {
                     Text(dateLabel).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                     Text("·").foregroundStyle(.secondary)
                     if day.cost != nil { totalCost }
-                    Text("\(tokens(day.tokens)) tok").contentTransition(.numericText()).animation(numberMotion, value: day.tokens).font(.custom("Menlo-Bold", size: 16)).foregroundStyle(.white.opacity(0.85))
+                    Text("\(tokens(day.tokens)) tok").contentTransition(.numericText()).animation(numberMotion, value: day.tokens).font(.custom("Menlo-Bold", size: 16)).foregroundStyle(BrandPalette.cream.opacity(0.85))
                         .lineLimit(1).minimumScaleFactor(0.7)
                     Spacer(minLength: 0)
                     Text(day.topModel ?? "Model unavailable")
@@ -110,25 +110,23 @@ struct DayDetailCard: View {
             .contentTransition(.numericText()).animation(numberMotion, value: day.cost)
     }
     private func partColor(_ index: Int) -> Color {
-        [Color(red: 0.88, green: 0.48, blue: 0.22),
-         Color(red: 0.38, green: 0.68, blue: 0.63),
-         Color(red: 0.64, green: 0.56, blue: 0.83)][index]
+        [BrandPalette.sand, BrandPalette.cream, BrandPalette.copper][index]
     }
     private func segment(_ index: Int, width: CGFloat) -> some View {
         let color = partColor(index)
         return Rectangle()
             .fill(LinearGradient(colors: [color.opacity(0.95), color.opacity(0.45), color.opacity(0.8)], startPoint: .top, endPoint: .bottom))
-            .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.55)).frame(height: 0.7) }
+            .overlay(alignment: .top) { Rectangle().fill(BrandPalette.cream.opacity(0.55)).frame(height: 0.7) }
             .overlay(alignment: .trailing) { if index == 0 { Rectangle().fill(.black.opacity(0.45)).frame(width: 1) } }
             .overlay {
                 if width >= 100 {
                     HStack(spacing: 7) {
                         if day.cost != nil { Text(money(costs[index])).contentTransition(.numericText()) }
                         Text("\(tokens(counts[index])) tok").contentTransition(.numericText())
-                    }.font(.custom("Menlo-Bold", size: 10)).foregroundStyle(.white).lineLimit(1)
+                    }.font(.custom("Menlo-Bold", size: 10)).foregroundStyle(BrandPalette.cream).lineLimit(1)
                 } else if width >= 18 {
                     Text(day.cost == nil ? "\(tokens(counts[index])) tok" : money(costs[index])).contentTransition(.numericText())
-                        .font(.custom("Menlo-Bold", size: 10)).foregroundStyle(.white)
+                        .font(.custom("Menlo-Bold", size: 10)).foregroundStyle(BrandPalette.cream)
                         .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 1)
                 }
             }

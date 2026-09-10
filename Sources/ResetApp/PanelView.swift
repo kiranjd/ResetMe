@@ -90,7 +90,7 @@ struct IslandView: View {
                     let emergence = 1.0
                     let pulse = sin(Double.pi * emergence)
                     let inset: CGFloat = 0
-                    let color: Color = value == nil ? .secondary : remaining < 5 ? Color(red: 0.98, green: 0.57, blue: 0.48) : remaining < 10 ? .orange : themeAccent
+                    let color: Color = value == nil ? .secondary : remaining < 5 ? BrandPalette.copper : remaining < 10 ? BrandPalette.sand : themeAccent
                     SharedQuotaLine(progress: progress, destination: bar, closingElapsed: store.expanded ? nil : motion.closingElapsed, origin: CGRect(x: virtualNotch.minX - IslandMotion.wingWidth - surfaceFrame.minX + inset, y: 0, width: store.notchSize.width + IslandMotion.wingWidth - 2 * inset, height: store.notchSize.height - inset))
                         .stroke(Color(white: 0.30), style: StrokeStyle(lineWidth: 2.5 + 2.5 * t, lineCap: .round, lineJoin: .round))
                         .opacity(lineOpacity * emergence)
@@ -163,7 +163,7 @@ struct PanelView: View {
                             .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
                     }
                     if let error = store.error {
-                        Text(error).font(.system(size: 11)).foregroundStyle(.orange.opacity(0.9))
+                        Text(error).font(.system(size: 11)).foregroundStyle(BrandPalette.sand)
                             .fixedSize(horizontal: false, vertical: true).padding(.vertical, 8)
                     }
                     if !store.visibleBuckets.contains(where: { $0.id == store.provider.rawValue && $0.windows.contains(where: { $0.windowDurationMins == 10080 }) }) {
@@ -235,8 +235,8 @@ struct PanelView: View {
                 Button { store.selectedID = bucket.id; store.onData?() } label: {
                     HStack(spacing: 6) {
                         Image(nsImage: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("ProviderIcon-\(store.provider.rawValue).png")) ?? NSImage())
-                            .resizable().renderingMode(.template).scaledToFit().frame(width: 13, height: 13).foregroundStyle(.white.opacity(0.8)).accessibilityLabel(store.provider.displayName)
-                        Text(store.quotaTitle(bucket)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.65))
+                            .resizable().renderingMode(.template).scaledToFit().frame(width: 13, height: 13).foregroundStyle(BrandPalette.cream.opacity(0.8)).accessibilityLabel(store.provider.displayName)
+                        Text(store.quotaTitle(bucket)).font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandPalette.cream.opacity(0.65))
                         if bucket.id == store.provider.rawValue, store.quotaTitle(bucket) != "Compute poor", let plan = bucket.planType { Text(PlanLabel.format(plan)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
                     }
                 }.buttonStyle(.plain).help("Show \(bucket.name) on the notch")
@@ -265,10 +265,10 @@ struct PanelView: View {
                         Text("Resets in \(store.countdown(window.resetDate))").font(.system(size: 11)).monospacedDigit()
                             .foregroundStyle(.secondary)
                             .help(window.resetDate?.formatted(date: .complete, time: .shortened) ?? "Reset time unavailable")
-                    }.foregroundStyle(.white).matteContentShade(spread: 7)
+                    }.foregroundStyle(BrandPalette.cream).matteContentShade(spread: 7)
                     GeometryReader { proxy in
-                        Capsule().fill(.white.opacity(0.12)).overlay(alignment: .leading) {
-                            Capsule().fill(window.remaining <= 10 ? Color.orange.opacity(0.9) : themeAccent)
+                        Capsule().fill(BrandPalette.cream.opacity(0.12)).overlay(alignment: .leading) {
+                            Capsule().fill(window.remaining <= 10 ? BrandPalette.sand : themeAccent)
                                 .frame(width: store.sourceFresh ? proxy.size.width * window.remaining / 100 : 0)
                         }
                     }.frame(height: 5).matteContentShade(spread: 5)
@@ -336,10 +336,10 @@ final class ProviderPickerButton: NSButton {
         let plan = store.buckets.first(where: { $0.id == store.provider.rawValue })?.planType.map(PlanLabel.format) ?? store.provider.displayName
         let style = NSMutableParagraphStyle(); style.lineBreakMode = .byTruncatingTail
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.75), .paragraphStyle: style]
+            .foregroundColor: NSColor(BrandPalette.cream).withAlphaComponent(0.75), .paragraphStyle: style]
         let text = NSAttributedString(string: plan, attributes: attrs)
         text.draw(in: NSRect(x: 16, y: center - 7, width: 41, height: 14))
-        NSColor.white.withAlphaComponent(0.55).setStroke()
+        NSColor(BrandPalette.cream).withAlphaComponent(0.55).setStroke()
         let arrow = NSBezierPath(); arrow.lineWidth = 1
         arrow.move(to: NSPoint(x: 59, y: center - 1))
         arrow.line(to: NSPoint(x: 61.5, y: center + 1.5))

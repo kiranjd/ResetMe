@@ -4,7 +4,16 @@ import SwiftUI
 let suite = "reset.scene-check." + UUID().uuidString
 let defaults = UserDefaults(suiteName: suite)!
 defer { defaults.removePersistentDomain(forName: suite) }
+defaults.set(["barR": 0.58, "barG": 0.39, "barB": 0.18, "resetR": 0.18, "curve": 0.4], forKey: "opticalScene.v1")
 let settings = SceneSettings(defaults: defaults)
+precondition(settings.rgb("bar") == [96.0/255, 108.0/255, 56.0/255])
+precondition(settings.rgb("reset") == [221.0/255, 161.0/255, 94.0/255])
+precondition(settings["curve"] == 0.4)
+precondition(defaults.dictionary(forKey: "opticalScene.beforeLeafPalette.v1")?["barR"] as? Double == 0.58)
+settings.setColor("bar", .blue)
+precondition(SceneSettings(defaults: defaults).rgb("bar") == settings.rgb("bar"))
+settings.reset(group: "Glass bars")
+
 for parameter in SceneSettings.parameters {
     settings.set(parameter.id, parameter.range.upperBound + 100)
     precondition(settings[parameter.id] == parameter.range.upperBound)
@@ -23,7 +32,7 @@ let restored = SceneSettings(defaults: defaults)
 precondition(restored["curve"] == 0.4 && restored["dotSize"] == 3.2)
 restored.reset(group: "Glass bars")
 precondition(restored["curve"] == 0.12 && restored["dotSize"] == 3.2)
-precondition(restored.rgb("bar") == [0.48, 0.29, 0.17])
+precondition(restored.rgb("bar") == [96.0/255, 108.0/255, 56.0/255])
 precondition(restored.rgb("dot") == dotBefore)
 let savedDot = restored.rgb("dot")
 let savedBar = restored.rgb("bar")

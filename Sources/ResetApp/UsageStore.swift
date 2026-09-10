@@ -200,7 +200,7 @@ import ResetCore
     var stale: Bool { lastUpdated.map { now.timeIntervalSince($0) > 150 } ?? true }
     var sourceFresh: Bool { !stale && error == nil }
     var usable: Bool { sourceFresh && window != nil }
-    var tint: Color { !usable ? Color.secondary : ((window?.remaining ?? 0) <= 10 ? Color(red: 0.98, green: 0.70, blue: 0.48) : Color(red: 0.86, green: 0.52, blue: 0.30)) }
+    var tint: Color { !usable ? Color.secondary : ((window?.remaining ?? 0) <= 10 ? BrandPalette.sand : BrandPalette.cream) }
     var sharedFiveHour: LimitWindow? {
         guard sourceFresh, let main = buckets.first(where: { $0.id == provider.rawValue }) ?? buckets.first else { return nil }
         return main.windows.first(where: { $0.windowDurationMins == 300 }) ?? main.constraining

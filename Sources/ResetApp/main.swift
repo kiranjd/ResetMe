@@ -79,7 +79,12 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
             return event
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "arrow.counterclockwise.circle", accessibilityDescription: "ResetMe usage")
+        if let url = Bundle.main.url(forResource: "LeafTemplate", withExtension: "png"), let leaf = NSImage(contentsOf: url) {
+            leaf.size = NSSize(width: 18, height: 18)
+            leaf.isTemplate = true
+            leaf.accessibilityDescription = "ResetMe usage"
+            statusItem.button?.image = leaf
+        }
         statusItem.button?.toolTip = "ResetMe"
         let menu = NSMenu(); menu.delegate = self
         let visibility = NSMenuItem(title: "Hide ResetMe", action: #selector(toggleVisibility), keyEquivalent: "")

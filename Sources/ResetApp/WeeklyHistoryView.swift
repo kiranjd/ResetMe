@@ -17,7 +17,7 @@ struct WeeklyHistoryView: View {
     @State private var pointer: CGPoint?
     @State private var metric = HistoryMetric.cost
     private var accent: Color { scene.color("accent") }
-    private let hoverAccent = Color(red: 0.65, green: 0.58, blue: 0.46)
+    private var hoverAccent: Color { scene.color("accent") }
     private var visibleCount: Int { extended ? 14 : 7 }
     private var firstIndex: Int { max(0, store.tokenDays.count - visibleCount) }
     private var selectedDay: TokenDay? { store.tokenDays.first { $0.date == selected } ?? store.pinnedDay ?? store.tokenDays.last }
@@ -81,6 +81,7 @@ struct WeeklyHistoryView: View {
     }
     private struct ChartLayout {
         var centers: [CGFloat]
+        var barWidth: CGFloat
         var markers: [ResetPosition]
     }
     private func resetLayout(width: CGFloat, barWidth: CGFloat) -> ChartLayout {
@@ -92,6 +93,7 @@ struct WeeklyHistoryView: View {
         }
         let boundaries = Set(indices.filter { $0 > 0 && $0 < visibleCount })
         let resetGap: CGFloat = boundaries.isEmpty ? 0 : min(CGFloat(scene["resetGap"]), width * 0.22 / CGFloat(boundaries.count))
+        let barWidth = min(barWidth, max(1, (width - resetGap * CGFloat(boundaries.count) - 3 * CGFloat(visibleCount - 1)) / CGFloat(visibleCount)))
         let step: CGFloat = max(0, width - barWidth - resetGap * CGFloat(boundaries.count)) / CGFloat(visibleCount - 1)
         var centers: [CGFloat] = []
         for index in 0..<visibleCount {
@@ -105,13 +107,13 @@ struct WeeklyHistoryView: View {
             else { x = (centers[index - 1] + centers[index]) * 0.5 }
             markers.append(ResetPosition(group: group, x: x))
         }
-        return ChartLayout(centers: centers, markers: markers)
+        return ChartLayout(centers: centers, barWidth: barWidth, markers: markers)
     }
     private var chart: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
-            let barWidth: CGFloat = scene["barWidth"]
-            let layout = resetLayout(width: width, barWidth: barWidth)
+            let layout = resetLayout(width: width, barWidth: scene["barWidth"])
+            let barWidth = layout.barWidth
             let step = max(1, (width - barWidth) / CGFloat(visibleCount - 1))
             let centers = layout.centers
             let markers = layout.markers
@@ -209,7 +211,7 @@ struct WeeklyHistoryView: View {
             ForEach(group.events) { event in
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
-                        Image(systemName: "arrow.counterclockwise.circle.fill").foregroundStyle(.green)
+                        Image(systemName: "arrow.counterclockwise.circle.fill").foregroundStyle(scene.color("reset"))
                         Text(event.kind == .scheduled ? "Scheduled weekly reset" : "Reset")
                             .fontWeight(.semibold)
                     }.font(.system(size: 10))
@@ -255,11 +257,11 @@ struct WeeklyHistoryView: View {
     }
     private func detailRow(_ title: String, icon: String, tokens: Int, cost: Double?) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: icon).font(.system(size: 9)).frame(width: 12).foregroundStyle(.white.opacity(0.35))
+            Image(systemName: icon).font(.system(size: 9)).frame(width: 12).foregroundStyle(BrandPalette.cream.opacity(0.35))
             Text(title).font(.custom("Menlo", size: 10)).foregroundStyle(.secondary)
             Spacer()
             Text(metric == .tokens ? tokens.formatted(.number.notation(.compactName).precision(.fractionLength(2))) : cost.map { $0.formatted(.currency(code: "USD").precision(.fractionLength(0))) } ?? "—")
-                .font(.custom("Menlo", size: 10)).foregroundStyle(.white.opacity(0.6))
+                .font(.custom("Menlo", size: 10)).foregroundStyle(BrandPalette.cream.opacity(0.6))
         }
         .accessibilityLabel("\(title == "in" ? "Uncached input" : title == "cached" ? "Cached input" : "Output"), \(tokens) tokens")
     }
@@ -281,7 +283,7 @@ private struct ResetBoundaryMarker: View {
                 .fill(LinearGradient(colors: [green.opacity(0.85), green.opacity(0.65), green], startPoint: .leading, endPoint: .trailing))
                 .frame(width: scene["resetWidth"], height: 72-scene["resetSize"]+3)
                 .overlay(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.5)).frame(width: 0.5).padding(.vertical, 1)
+                    Capsule().fill(BrandPalette.cream.opacity(0.5)).frame(width: 0.5).padding(.vertical, 1)
                 }
                 .offset(y: scene["resetSize"]-3)
             Group {

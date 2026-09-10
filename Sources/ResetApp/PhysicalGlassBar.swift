@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import Combine
 
-/// Frosted amber with diffuse transmission and a narrow polished rim.
+/// Palette-colored frosted glass with diffuse transmission and a narrow polished rim.
 /// Shared Mac-driven light shifts the broad highlight across the face.
 struct PhysicalGlassBar: NSViewRepresentable {
     var emphasized: Bool
@@ -52,7 +52,10 @@ final class GlassLightingView: NSView {
         let light = surface?.opticalLight ?? NSPoint(x: 170, y: 110)
         let shift = tanh((light.x-origin.x-bounds.midX)/200)
         let height = Double(bounds.height), width = Double(bounds.width)
-        // Frosted amber: broad diffuse body, narrow polished rim and warm foot transmission.
+        let tint = SceneSettings.shared.rgb("bar").map { min(1, $0 * 1.35) }
+        let transmission = SceneSettings.shared.rgb("accent")
+        let rim = transmission.map { $0 * 0.55 + 0.45 }
+        // Broad diffuse body and polished rim inherit the current palette.
         // The matte body intentionally obscures the busy mesh behind it.
         for y in 0..<h {
             let py = (Double(y)+0.5)/scale
@@ -65,13 +68,11 @@ final class GlassLightingView: NSView {
                 let broad = exp(-pow((u-(0.30+shift*0.14))/0.32,2))
                 let glint = exp(-pow((px-(1.5+shift*0.4))/1.0,2))*0.15
                 let body = 0.82+0.16*broad+0.12*bottom
-                let tint = [0.69,0.39,0.16]
-                let warm = [1.0,0.68,0.29]
                 let highlight = min(0.75,side*0.30+top*0.63+glint)
                 let index = (y*w+x)*4
                 for channel in 0..<3 {
-                    let base = tint[channel]*body+warm[channel]*bottom*0.15
-                    let value = base*(1-highlight)+[1.0,0.88,0.65][channel]*highlight
+                    let base = tint[channel]*body+transmission[channel]*bottom*0.15
+                    let value = base*(1-highlight)+rim[channel]*highlight
                     bytes[index+channel] = UInt8(min(1,max(0,value*(emphasized ? 1.06 : 1)))*255)
                 }
             }
