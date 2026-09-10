@@ -8,6 +8,7 @@ struct DayDetailCard: View {
     let day: TokenDay
     let expanded: Bool
     let close: () -> Void
+    var showClickHint = false
     private var accent: Color { scene.color("accent") }
     private func money(_ amount: Double?) -> String { amount.map { $0.formatted(.currency(code: "USD").precision(.fractionLength($0 < 10 ? 2 : 0))) } ?? "—" }
     private func tokens(_ count: Int?) -> String { count.map { $0.formatted(.number.notation(.compactName).precision(.fractionLength($0 < 10_000_000 ? 1 : 0))) } ?? "—" }
@@ -45,6 +46,10 @@ struct DayDetailCard: View {
                 Text(dateLabel).font(.system(size: 10)).foregroundStyle(.secondary)
                 totalCost
                 Text("\(tokens(day.tokens)) tokens").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            if showClickHint {
+                Label("Click for details", systemImage: "arrow.up.right")
+                    .font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
             }
             if expanded {
                 GeometryReader { geometry in
@@ -139,21 +144,28 @@ struct DayDetailCard: View {
 }
 
 struct HoverStripes: View {
+    @Environment(\.accessibilityReduceMotion) private var reducedMotion
+
     var body: some View {
-                    TimelineView(.animation(minimumInterval: 1.0/30, paused: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)) { timeline in
-                        Canvas { context, size in
-                            let phase = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.8)/0.8*18
-                            for offset in stride(from: -Double(size.height)-18, through: Double(size.width)+Double(size.height)+18, by: 18) {
-                                var path = Path()
-                                path.move(to: CGPoint(x: offset+phase, y: 0))
-                                path.addLine(to: CGPoint(x: offset+phase+7, y: 0))
-                                path.addLine(to: CGPoint(x: offset+phase+7-Double(size.height), y: size.height))
-                                path.addLine(to: CGPoint(x: offset+phase-Double(size.height), y: size.height))
-                                path.closeSubpath()
-                                context.fill(path, with: .color(.white.opacity(0.30)))
-                            }
-                        }.clipped()
-                    }.allowsHitTesting(false)
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reducedMotion)) { timeline in
+            Canvas { context, size in
+                let period = 18.0
+                let phase = reducedMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 1.2) / 1.2 * period
+                context.addFilter(.blur(radius: 0.65))
+                for offset in stride(from: -Double(size.height) - period,
+                                     through: Double(size.width) + Double(size.height) + period,
+                                     by: period) {
+                    var path = Path()
+                    path.move(to: CGPoint(x: offset + phase, y: -2))
+                    path.addLine(to: CGPoint(x: offset + phase + 7, y: -2))
+                    path.addLine(to: CGPoint(x: offset + phase + 3 - Double(size.height), y: size.height + 2))
+                    path.addLine(to: CGPoint(x: offset + phase - 4 - Double(size.height), y: size.height + 2))
+                    path.closeSubpath()
+                    context.fill(path, with: .color(.white.opacity(0.22)))
+                }
+            }.clipped()
+        }.allowsHitTesting(false)
     }
 }
 

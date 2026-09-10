@@ -10,6 +10,7 @@ struct WeeklyHistoryView: View {
     @State private var detailIntent: Task<Void, Never>?
     @State private var detailDay: TokenDay?
     @State private var resetHovered = false
+    @State private var hoveredResetDay: ResetDay?
     @State private var docking = false
     @State private var dockFrame: CGRect?
     @State private var dockTask: Task<Void, Never>?
@@ -70,38 +71,54 @@ struct WeeklyHistoryView: View {
 
         .animation(motion, value: store.dayCardHeight)
         .onAppear { if store.provider == .claude { metric = .tokens } }
-        .onChange(of: store.provider) { metric = store.provider == .claude ? .tokens : .cost }
+        .onChange(of: store.provider) { metric = store.provider == .claude ? .tokens : .cost; resetHovered = false; hoveredResetDay = nil }
         .onDisappear { detailIntent?.cancel(); dockTask?.cancel(); docking = false; detailDay = nil }
+    }
+    private struct ResetPosition: Identifiable {
+        var group: ResetDay
+        var x: CGFloat
+        var id: Date { group.id }
+    }
+    private struct ChartLayout {
+        var centers: [CGFloat]
+        var markers: [ResetPosition]
+    }
+    private func resetLayout(width: CGFloat, barWidth: CGFloat) -> ChartLayout {
+        let groups = resetDays
+        let first = store.tokenDays.dropFirst(firstIndex).first?.date
+        let indices: [Int] = groups.map { group in
+            guard let first else { return -1 }
+            return Calendar.current.dateComponents([.day], from: first, to: group.date).day ?? -1
+        }
+        let boundaries = Set(indices.filter { $0 > 0 && $0 < visibleCount })
+        let resetGap: CGFloat = boundaries.isEmpty ? 0 : min(CGFloat(scene["resetGap"]), width * 0.22 / CGFloat(boundaries.count))
+        let step: CGFloat = max(0, width - barWidth - resetGap * CGFloat(boundaries.count)) / CGFloat(visibleCount - 1)
+        var centers: [CGFloat] = []
+        for index in 0..<visibleCount {
+            let offset = CGFloat(boundaries.filter { $0 <= index }.count) * resetGap
+            centers.append(CGFloat(index) * step + barWidth * 0.5 + offset)
+        }
+        var markers: [ResetPosition] = []
+        for (group, index) in zip(groups, indices) where index >= 0 && index < visibleCount {
+            let x: CGFloat
+            if index == 0 { x = max(CGFloat(scene["resetSize"]) * 0.5, centers[0] - barWidth * 0.5) }
+            else { x = (centers[index - 1] + centers[index]) * 0.5 }
+            markers.append(ResetPosition(group: group, x: x))
+        }
+        return ChartLayout(centers: centers, markers: markers)
     }
     private var chart: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let barWidth: CGFloat = scene["barWidth"]
-            let boundary = resetMarker.flatMap { marker in
-                store.tokenDays.dropFirst(firstIndex).first.map { first in
-                    Calendar.current.dateComponents([.day], from: first.date, to: Calendar.current.startOfDay(for: marker.date)).day ?? -1
-                }
-            } ?? -1
-            let hasBoundary = boundary > 0 && boundary < visibleCount
-            let resetGap: CGFloat = hasBoundary ? scene["resetGap"] : 0
-            let step = (width - barWidth - resetGap) / CGFloat(visibleCount - 1)
-            let centers = (0..<visibleCount).map { index in
-                CGFloat(index) * step + barWidth / 2 + (hasBoundary && index >= boundary ? resetGap : 0)
-            }
+            let layout = resetLayout(width: width, barWidth: barWidth)
+            let step = max(1, (width - barWidth) / CGFloat(visibleCount - 1))
+            let centers = layout.centers
+            let markers = layout.markers
             let maximum = max(1, store.tokenDays.compactMap { value($0) }.max() ?? 1)
             ZStack(alignment: .topLeading) {
                 LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black.opacity(scene["chartShade"]*0.4), location: 0.3), .init(color: .black.opacity(scene["chartShade"]*0.82), location: 0.76), .init(color: .black.opacity(scene["chartShade"]), location: 1)], startPoint: .top, endPoint: .bottom)
                     .allowsHitTesting(false)
-                if let marker = resetMarker, let first = store.tokenDays.dropFirst(firstIndex).first?.date {
-                    let boundary = Calendar.current.dateComponents([.day], from: first, to: Calendar.current.startOfDay(for: marker.date)).day ?? -1
-                    if boundary > 0 && boundary < visibleCount {
-                        let split = (centers[boundary - 1] + centers[boundary]) / 2
-                        HStack(spacing: 0) {
-                            LinearGradient(colors: [hoverAccent.opacity(0.09), .clear], startPoint: .bottom, endPoint: .top).frame(width: split)
-                            LinearGradient(colors: [accent.opacity(0.15), .clear], startPoint: .bottom, endPoint: .top)
-                        }.frame(width: width, height: 68).blur(radius: 8).offset(y: 5).allowsHitTesting(false)
-                    }
-                }
                 if let pointer {
                     RadialGradient(colors: [accent.opacity(scene["glow"]*4.375), accent.opacity(scene["glow"]*1.25), .clear], center: .center, startRadius: 0, endRadius: 58)
                         .frame(width: 116, height: 116).position(x: pointer.x, y: min(66, max(14, pointer.y)))
@@ -138,21 +155,20 @@ struct WeeklyHistoryView: View {
                         .accessibilityHidden(index < firstIndex)
                         .accessibilityAction(named: "Open day details") { store.pinDay(day) }
                 }
-                if let marker = resetMarker, let first = store.tokenDays.dropFirst(firstIndex).first?.date {
-                    let boundary = Calendar.current.dateComponents([.day], from: first, to: Calendar.current.startOfDay(for: marker.date)).day ?? -1
-                    if boundary > 0 && boundary < visibleCount {
-                        let x = (centers[boundary - 1] + centers[boundary]) / 2
-                        ResetBoundaryMarker()
-                            .position(x: x, y: 36)
-                            .help("\("Usage was reset") · \(marker.date.formatted())")
-                    }
+                ForEach(markers) { marker in
+                    ResetBoundaryMarker(count: marker.group.events.count)
+                        .position(x: marker.x, y: 36)
+                        .help("\(marker.group.events.count) weekly reset(s) · \(marker.group.date.formatted(date: .abbreviated, time: .omitted))")
                 }
                 if store.historyLoading && store.tokenDays.isEmpty {
                     Text("Loading history").font(.system(size: 9)).foregroundStyle(.secondary).position(x: width / 2, y: 36)
                 }
             }.frame(width: width, height: 76).clipped().contentShape(Rectangle())
-                .background(HistoryHoverPanel(point: pointer, content: resetHovered ? resetHoverContent : ((store.pinnedDay == nil || docking) ? detailDay.map { AnyView(DayDetailCard(day: $0, expanded: false, close: {})) } : nil), cardHeight: resetHovered ? 48 : 82, docking: docking, dockFrame: dockFrame, onDocked: finishDock).allowsHitTesting(false))
+                .background(HistoryHoverPanel(point: pointer, content: resetHovered ? resetHoverContent : ((store.pinnedDay == nil || docking) ? detailDay.map { AnyView(DayDetailCard(day: $0, expanded: false, close: {}, showClickHint: true)) } : nil), cardHeight: resetHovered ? resetHoverHeight : 100, cardWidth: resetHovered ? resetHoverWidth : 140, docking: docking, dockFrame: dockFrame, onDocked: finishDock).allowsHitTesting(false))
                 .overlay(ChartPressSurface(pressed: { location in
+                    if let marker = markers.min(by: { abs($0.x - location.x) < abs($1.x - location.x) }), abs(marker.x - location.x) < 8 {
+                        return
+                    }
                     let nearest = centers.indices.min(by: { abs(centers[$0]-location.x) < abs(centers[$1]-location.x) }) ?? 0
                     let index = firstIndex + nearest
                     guard store.tokenDays.indices.contains(index) else { return }
@@ -162,8 +178,8 @@ struct WeeklyHistoryView: View {
                         pointer = nil; selected = nil; detailDay = nil; resetHovered = false; return
                     }
                     pointer = location
-                    if hasBoundary && abs(location.x-(centers[boundary-1]+centers[boundary])/2) < 8 {
-                        resetHovered = true; selected = nil; detailDay = nil; return
+                    if let marker = markers.min(by: { abs($0.x - location.x) < abs($1.x - location.x) }), abs(marker.x - location.x) < 8 {
+                        hoveredResetDay = marker.group; resetHovered = true; selected = nil; detailDay = nil; return
                     }
                     resetHovered = false
                     let nearest = centers.indices.min(by: { abs(centers[$0]-location.x) < abs(centers[$1]-location.x) }) ?? 0
@@ -177,18 +193,33 @@ struct WeeklyHistoryView: View {
                 }))
         }
     }
+    private var resetHoverWidth: CGFloat {
+        hoveredResetDay?.events.contains(where: { $0.kind == .scheduled }) == true ? 156 : 124
+    }
+    private var resetHoverHeight: CGFloat {
+        let count = hoveredResetDay?.events.count ?? 1
+        return CGFloat(count * 30 + (count > 1 ? 22 : 10))
+    }
     private var resetHoverContent: AnyView? {
-        guard let marker = resetMarker else { return nil }
-        return AnyView(VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text("Usage was reset").font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
+        guard let group = hoveredResetDay else { return nil }
+        return AnyView(VStack(alignment: .leading, spacing: 6) {
+            if group.events.count > 1 {
+                Text("\(group.events.count) weekly resets").font(.system(size: 10, weight: .semibold))
             }
-            Text(marker.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
-                .font(.system(size: 10)).foregroundStyle(.secondary)
-        }.padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            ForEach(group.events) { event in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.counterclockwise.circle.fill").foregroundStyle(.green)
+                        Text(event.kind == .scheduled ? "Scheduled weekly reset" : "Reset")
+                            .fontWeight(.semibold)
+                    }.font(.system(size: 10))
+                    Text(event.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
+                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }.padding(6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 9).fill(Color(white: 0.045)))
-            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.09), lineWidth: 0.5)))
+            .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.09), lineWidth: 0.5) })
     }
     private func dock(_ day: TokenDay) {
         detailIntent?.cancel(); dockTask?.cancel()
@@ -232,17 +263,16 @@ struct WeeklyHistoryView: View {
         }
         .accessibilityLabel("\(title == "in" ? "Uncached input" : title == "cached" ? "Cached input" : "Output"), \(tokens) tokens")
     }
-    var resetMarker: (date: Date, observed: Bool)? {
-        let samples = store.samples.filter { $0.bucketID == store.provider.rawValue + ":weekly" }.sorted { $0.timestamp < $1.timestamp }
-        for (before, after) in zip(samples, samples.dropFirst()).reversed() {
-            if after.resetAt != before.resetAt && after.used < before.used { return (after.timestamp, true) }
-        }
-        return nil
+    private var resetDays: [ResetDay] {
+        guard let start = store.tokenDays.dropFirst(firstIndex).first?.date,
+              let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: store.now)) else { return [] }
+        return ResetDay.groups(store.resetHistory.events, provider: store.provider, start: start, end: end)
     }
 }
 
 
 private struct ResetBoundaryMarker: View {
+    var count: Int
     @ObservedObject private var scene = SceneSettings.shared
     private var green: Color { scene.color("reset") }
     var body: some View {
@@ -254,7 +284,10 @@ private struct ResetBoundaryMarker: View {
                     Capsule().fill(.white.opacity(0.5)).frame(width: 0.5).padding(.vertical, 1)
                 }
                 .offset(y: scene["resetSize"]-3)
-            Image(systemName: "arrow.clockwise")
+            Group {
+                if count > 1 { Text(count > 9 ? "9+" : String(count)) }
+                else { Image(systemName: "arrow.clockwise") }
+            }
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.black.opacity(0.8))
                 .frame(width: scene["resetSize"], height: scene["resetSize"])
@@ -264,7 +297,7 @@ private struct ResetBoundaryMarker: View {
                 .overlay { Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.5) }
         }
         .frame(width: scene["resetSize"], height: 72, alignment: .top)
-        .accessibilityLabel("Reset boundary")
+        .accessibilityLabel("\(count) quota reset\(count == 1 ? "" : "s")")
     }
 }
 
