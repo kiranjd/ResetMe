@@ -1,0 +1,13 @@
+name = "resetme-web-analytics"
+main = "index.mjs"
+compatibility_date = "2026-09-22"
+account_id = "fdac8b0e56733c4ed67f09ed0d83607a"
+workers_dev = true
+
+[observability]
+enabled = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "resetme-web-analytics"
+database_id = "09e96887-da99-4ff5-bcf0-6410145ce40e"

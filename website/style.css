@@ -64,3 +64,5 @@ main>.works-with .provider-name{font-size:14px;gap:5px}
 /* Shared ResetMe palette: olive, forest, cream, sand, copper. */
 :root{--olive:#606c38;--forest:#283618;--cream:#fefae0;--sand:#dda15e;--copper:#bc6c25}
 ::selection{background:var(--sand);color:var(--forest)}.brand{color:var(--forest)}.brand img{border-radius:0}.works-with{color:var(--olive)}.works-with span{color:var(--forest)}.hover-note{color:var(--olive)}.text-link{color:var(--forest);text-decoration:underline;text-decoration-color:var(--copper)}
+
+.analytics-note{display:block;font-size:11px;opacity:.6;margin-left:auto;max-width:250px;text-align:right}.analytics-note a{text-decoration:underline}
