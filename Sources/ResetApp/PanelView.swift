@@ -46,25 +46,32 @@ struct IslandView: View {
                 if progress > 0.001 {
                 VStack(spacing: 0) {
                     HStack {
-                        ProviderPicker(store: store)
-                            .frame(width: 65, height: store.notchSize.height - 7, alignment: .leading)
+                        Group {
+                            if store.promptingOpen { Text("Codex").font(.system(size: 10, weight: .medium)) }
+                            else { ProviderPicker(store: store) }
+                        }.frame(width: 65, height: store.notchSize.height - 7, alignment: .leading)
                         Spacer()
-                        Button { store.refresh() } label: {
+                        Button { if store.promptingOpen { store.prompting.refresh() } else { store.refresh() } } label: {
                             Image(systemName: "arrow.clockwise").font(.system(size: 10)).frame(width: 20, height: 24).matteContentShade()
-                        }.buttonStyle(.plain).disabled(store.refreshing)
-                            .accessibilityLabel("Refresh usage").help(store.freshness)
+                        }.buttonStyle(.plain).disabled(store.refreshing && !store.promptingOpen)
+                            .accessibilityLabel(store.promptingOpen ? "Refresh prompting" : "Refresh usage").help(store.promptingOpen ? "Refresh local prompting history" : store.freshness)
                         Menu {
                             Button(store.indicatorHidden ? "Show ResetMe" : "Hide ResetMe") { store.toggleIndicator() }
                             Button("Settings…") { store.dismiss(); store.visibilitySettings.show() }
                             Button("Check for Updates…") { AppUpdater.shared.checkForUpdates() }
                             Divider()
-                            if store.provider == .codex { Toggle("Enable Spark", isOn: Binding(get: { store.sparkEnabled }, set: { store.setSparkEnabled($0) })) }
                             Divider()
                             Button("Quit ResetMe") { NSApplication.shared.terminate(nil) }
                         } label: { Image(systemName: "ellipsis").frame(width: 16, height: 24).matteContentShade() }
                             .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 20, height: 24).clipped().accessibilityLabel("ResetMe menu")
                     }.foregroundStyle(.secondary).padding(.horizontal, 16).frame(height: store.notchSize.height - 7)
-                    PanelView(store: store)
+                    HStack(spacing: 18) {
+                        surfaceTab("Usage", prompting: false)
+                        surfaceTab("Prompting", prompting: true)
+                        Spacer()
+                    }.padding(.horizontal, 22).frame(height: 32)
+                    if store.promptingOpen { PromptingView(store: store.prompting) }
+                    else { PanelView(store: store) }
                 }.frame(width: 348, alignment: .top)
                     .opacity(reveal)
                     .blur(radius: 5 * (1 - reveal))
@@ -93,12 +100,12 @@ struct IslandView: View {
                     let color: Color = value == nil ? .secondary : remaining < 5 ? BrandPalette.copper : remaining < 10 ? BrandPalette.sand : themeAccent
                     SharedQuotaLine(progress: progress, destination: bar, closingElapsed: store.expanded ? nil : motion.closingElapsed, origin: CGRect(x: virtualNotch.minX - IslandMotion.wingWidth - surfaceFrame.minX + inset, y: 0, width: store.notchSize.width + IslandMotion.wingWidth - 2 * inset, height: store.notchSize.height - inset))
                         .stroke(Color(white: 0.30), style: StrokeStyle(lineWidth: 2.5 + 2.5 * t, lineCap: .round, lineJoin: .round))
-                        .opacity(lineOpacity * emergence)
+                        .opacity(lineOpacity * emergence * (store.promptingOpen ? 0 : 1))
                     SharedQuotaLine(progress: progress, destination: bar, closingElapsed: store.expanded ? nil : motion.closingElapsed, origin: CGRect(x: virtualNotch.minX - IslandMotion.wingWidth - surfaceFrame.minX + inset, y: 0, width: store.notchSize.width + IslandMotion.wingWidth - 2 * inset, height: store.notchSize.height - inset))
                         .trim(from: 0, to: remaining / 100)
                         .stroke(color, style: StrokeStyle(lineWidth: 2.5 + 2.5 * t, lineCap: .round, lineJoin: .round))
                         .shadow(color: color.opacity(pulse * 0.5), radius: 3 * pulse)
-                        .opacity(lineOpacity * emergence)
+                        .opacity(lineOpacity * emergence * (store.promptingOpen ? 0 : 1))
                     let resting = CGRect(x: virtualNotch.minX - IslandMotion.wingWidth - surfaceFrame.minX, y: 0, width: store.notchSize.width + IslandMotion.wingWidth, height: store.notchSize.height)
                     SharedQuotaLine(progress: 0, destination: bar, closingElapsed: nil, origin: resting)
                         .stroke(Color(white: 0.30), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
@@ -127,6 +134,16 @@ struct IslandView: View {
         .transaction { $0.animation = nil }
         .onExitCommand { store.dismiss() }
     }
+    private func surfaceTab(_ title: String, prompting: Bool) -> some View {
+        Button { store.showPrompting(prompting) } label: {
+            VStack(spacing: 5) {
+                Text(title).font(.system(size: 11, weight: .medium))
+                Capsule().fill(store.promptingOpen == prompting ? BrandPalette.cream.opacity(0.65) : .clear).frame(height: 1.5)
+            }.fixedSize(horizontal: true, vertical: false).frame(height: 28).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .foregroundStyle(BrandPalette.cream.opacity(store.promptingOpen == prompting ? 0.95 : 0.45))
+            .accessibilityAddTraits(store.promptingOpen == prompting ? .isSelected : [])
+    }
 }
 
 struct NotchContour: Shape {
@@ -154,11 +171,11 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(store.visibleBuckets.enumerated()), id: \.element.id) { index, bucket in
+                    ForEach(Array(store.buckets.enumerated()), id: \.element.id) { index, bucket in
                         bucketRows(bucket)
                             .modifier(DescendingReveal(amount: IslandMotion.smooth((motion.progress - 0.35 - Double(index) * 0.12) / 0.30)))
                     }
-                    if store.visibleBuckets.isEmpty {
+                    if store.buckets.isEmpty {
                         Text(store.refreshing ? "Connecting…" : "Quota unavailable")
                             .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
                     }
@@ -166,7 +183,7 @@ struct PanelView: View {
                         Text(error).font(.system(size: 11)).foregroundStyle(BrandPalette.sand)
                             .fixedSize(horizontal: false, vertical: true).padding(.vertical, 8)
                     }
-                    if !store.visibleBuckets.contains(where: { $0.id == store.provider.rawValue && $0.windows.contains(where: { $0.windowDurationMins == 10080 }) }) {
+                    if !store.buckets.contains(where: { $0.id == store.provider.rawValue && $0.windows.contains(where: { $0.windowDurationMins == 10080 }) }) {
                         if store.weeklyHistoryOpen {
                             WeeklyHistoryView(store: store).padding(.vertical, 8)
                         } else {
@@ -182,52 +199,36 @@ struct PanelView: View {
 
                 }.padding(.horizontal, 18).padding(.bottom, 14)
             }
-        }.frame(width: 348, height: store.detailHeight - 78)
+        }.frame(width: 348, height: store.detailHeight - 78 - 32)
     }
     var bankedResets: some View {
-        Group {
-            if store.displayedCreditDates.count == 1 {
-                HStack(spacing: 8) {
-                    Image(systemName: "ticket.fill").font(.system(size: 14)).foregroundStyle(themeAccent)
-                    Text("1 banked reset").font(.system(size: 12, weight: .medium)).matteContentShade()
-                    Spacer(minLength: 4)
-                    Text("Expires in \(store.countdown(store.displayedCreditDates[0]))")
-                        .font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit().matteContentShade()
-                        .help(store.displayedCreditDates[0]?.formatted(date: .complete, time: .shortened) ?? "Expiry unavailable")
-                }.padding(.vertical, 10).padding(.horizontal, 10)
-                    .background(.clear).padding(.top, 3)
-            } else {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "ticket.fill").font(.system(size: 15)).foregroundStyle(themeAccent)
-                                Text("\(store.displayedCreditDates.count) banked reset\(store.displayedCreditDates.count == 1 ? "" : "s")").font(.system(size: 12, weight: .semibold))
-                                Spacer()
-                                Text("Expire in").font(.system(size: 10)).foregroundStyle(.secondary)
-                            }
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 78), spacing: 8)], spacing: 8) {
-                                ForEach(Array(store.displayedCreditDates.enumerated()), id: \.offset) { index, expiry in
-                                    creditTile(index: index, expiry: expiry)
-                                }
-                            }
-                        }.padding(10)
-                            .background(.clear).padding(.top, 3)
-
+        HStack(spacing: 7) {
+            Image(systemName: "clock").font(.system(size: 11))
+            Text("Expires in").foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(store.displayedCreditDates.enumerated()), id: \.offset) { index, expiry in
+                        if index > 0 { Text("·").foregroundStyle(.secondary) }
+                        Text(resetExpiry(expiry))
+                            .help(expiry?.formatted(date: .complete, time: .shortened) ?? "Expiry unavailable")
+                            .accessibilityLabel("Banked reset \(index + 1), expires in \(resetExpiry(expiry))")
+                    }
                 }
+            }.fixedSize(horizontal: false, vertical: true)
         }
+        .font(.system(size: 11, weight: .medium)).monospacedDigit()
+        .foregroundStyle(themeAccent).frame(height: 32)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(store.displayedCreditDates.count) banked resets")
+    }
+    private func resetExpiry(_ date: Date?) -> String {
+        guard let date else { return "Unknown" }
+        let seconds = Int(date.timeIntervalSince(store.now))
+        if seconds <= 0 { return "Expired" }
+        if seconds >= 86400 { return "\(seconds / 86400)d \((seconds % 86400) / 3600)h" }
+        return store.countdown(date)
     }
 
-    func creditTile(index: Int, expiry: Date?) -> some View {
-        let first = index == 0
-        let label = expiry.map { $0 <= store.now ? "Expired" : store.countdown($0) } ?? "Unknown"
-        let foreground: Color = first ? themeAccent : .secondary
-        let background: Color = first ? themeAccent.opacity(0.09) : .white.opacity(0.035)
-        return Text(label)
-            .font(.custom(first ? "Menlo-Bold" : "Menlo-Regular", size: 11))
-            .foregroundStyle(foreground).frame(maxWidth: .infinity).padding(.vertical, 8)
-            .background(background, in: RoundedRectangle(cornerRadius: 7))
-            .help(expiry?.formatted(date: .complete, time: .shortened) ?? "Expiry unavailable")
-            .accessibilityLabel("Banked reset \(index + 1), expires in \(label)")
-    }
     func bucketRows(_ bucket: LimitBucket) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if bucket.id != store.provider.rawValue {
@@ -236,20 +237,13 @@ struct PanelView: View {
                     HStack(spacing: 6) {
                         Image(nsImage: NSImage(contentsOf: Bundle.main.resourceURL!.appendingPathComponent("ProviderIcon-\(store.provider.rawValue).png")) ?? NSImage())
                             .resizable().renderingMode(.template).scaledToFit().frame(width: 13, height: 13).foregroundStyle(BrandPalette.cream.opacity(0.8)).accessibilityLabel(store.provider.displayName)
-                        Text(store.quotaTitle(bucket)).font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandPalette.cream.opacity(0.65))
-                        if bucket.id == store.provider.rawValue, store.quotaTitle(bucket) != "Compute poor", let plan = bucket.planType { Text(PlanLabel.format(plan)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
+                        Text(bucket.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(BrandPalette.cream.opacity(0.65))
+                        if bucket.id == store.provider.rawValue, bucket.name != "Compute poor", let plan = bucket.planType { Text(PlanLabel.format(plan)).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
                     }
                 }.buttonStyle(.plain).help("Show \(bucket.name) on the notch")
                 Spacer()
-                if store.isSpark(bucket) {
-                    Button { store.toggleSpark() } label: {
-                        Image(systemName: store.sparkExpanded ? "chevron.up" : "chevron.down")
-                            .frame(width: 24, height: 18)
-                    }.buttonStyle(.plain).accessibilityLabel(store.sparkExpanded ? "Collapse Spark" : "Expand Spark")
-                }
             }.font(.system(size: 8, weight: .medium)).foregroundStyle(.secondary).padding(.top, 14).padding(.bottom, 7)
             }
-            if !store.isSpark(bucket) || store.sparkExpanded {
             if bucket.windows.isEmpty {
                 Text("Quota unavailable").font(.system(size: 11)).foregroundStyle(.secondary).frame(height: 39)
             }
@@ -291,7 +285,6 @@ struct PanelView: View {
                 .accessibilityAction(named: "Show seven-day token history") { store.setHistoryOpen(true) }
 
 
-            }
             }
         }
     }

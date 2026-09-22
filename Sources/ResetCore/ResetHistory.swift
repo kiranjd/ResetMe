@@ -32,6 +32,7 @@ public struct QuotaObservation: Codable, Hashable, Sendable {
     }
     public static func codexRecord(_ limits: [String: Any], at date: Date) -> [Self] {
         let id = limits["limit_id"] as? String ?? "codex"
+        guard CodexQuota.includes(id: id, name: limits["limit_name"] as? String ?? "") else { return [] }
         return ["primary", "secondary"].compactMap { slot in
             guard let window = limits[slot] as? [String: Any],
                   let used = window["used_percent"] as? Double,
@@ -96,6 +97,7 @@ public struct ResetHistory: Codable, Sendable {
 
     public mutating func observe(_ observations: [QuotaObservation]) {
         for current in observations.sorted(by: { $0.timestamp < $1.timestamp }) {
+            guard current.provider != .codex || CodexQuota.includes(id: current.bucketID, name: current.bucketName) else { continue }
             guard current.used.isFinite, (0...100).contains(current.used), current.durationMinutes == 10_080,
                   current.timestamp.timeIntervalSince1970.isFinite,
                   current.resetsAt.map({ $0.isFinite && $0 > 0 }) ?? true else { continue }
@@ -120,6 +122,7 @@ public struct ResetHistory: Codable, Sendable {
 
     public mutating func merge(_ incoming: [QuotaResetEvent]) {
         for event in incoming {
+            guard event.provider != .codex || CodexQuota.includes(id: event.bucketID, name: event.bucketName) else { continue }
             if let index = events.firstIndex(where: { Self.sameReset($0, event) }) {
                 let old = events[index]
                 // Prefer a confirmed scheduled boundary, otherwise the earliest detection.
@@ -182,7 +185,7 @@ public struct ResetDay: Identifiable, Sendable {
     public var events: [QuotaResetEvent]
     public var id: Date { date }
     public static func groups(_ events: [QuotaResetEvent], provider: UsageProvider, start: Date, end: Date, calendar: Calendar = .current) -> [Self] {
-        let filtered = events.filter { $0.provider == provider && $0.durationMinutes == 10_080 && $0.date >= start && $0.date < end }
+        let filtered = events.filter { ($0.provider != .codex || CodexQuota.includes(id: $0.bucketID, name: $0.bucketName)) && $0.provider == provider && $0.durationMinutes == 10_080 && $0.date >= start && $0.date < end }
         return Dictionary(grouping: filtered, by: { calendar.startOfDay(for: $0.date) })
             .map { Self(date: $0.key, events: $0.value.sorted { $0.date < $1.date }) }
             .sorted { $0.date < $1.date }

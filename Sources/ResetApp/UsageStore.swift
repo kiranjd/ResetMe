@@ -10,6 +10,13 @@ import ResetCore
 }
 
 @MainActor final class UsageStore: ObservableObject {
+    @Published var promptingOpen = false
+    let prompting = PromptingStore()
+    func showPrompting(_ value: Bool) {
+        promptingOpen = value
+        if value { prompting.refreshIfNeeded() }
+        onData?()
+    }
     @Published var weeklyHistoryOpen = false
     @Published var pinnedDay: TokenDay?
     @Published var dayDetailsExpanded = false
@@ -116,9 +123,6 @@ import ResetCore
     @Published var refreshing = false
     @Published var error: String?
     @Published var expanded = false
-    @Published var sparkExpanded = false
-    @Published var sparkEnabled = UserDefaults.standard.bool(forKey: "sparkEnabled")
-    var visibleBuckets: [LimitBucket] { buckets.filter { provider != .codex || sparkEnabled || !isSpark($0) } }
     func selectProvider(_ value: UsageProvider) {
         guard provider != value else { return }
         stopRequest()
@@ -133,16 +137,7 @@ import ResetCore
         onData?()
         refresh()
     }
-    func setSparkEnabled(_ enabled: Bool) {
-        sparkEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "sparkEnabled")
-        if !enabled, let bucket = buckets.first(where: { $0.id == selectedID }), isSpark(bucket) { selectedID = "codex" }
-        onData?()
-    }
-    func isSpark(_ bucket: LimitBucket) -> Bool { bucket.name.localizedCaseInsensitiveContains("spark") || bucket.id.localizedCaseInsensitiveContains("spark") }
     func displayWindows(_ bucket: LimitBucket) -> [LimitWindow] { bucket.windows }
-    func quotaTitle(_ bucket: LimitBucket) -> String { bucket.name == "GPT-5.3-Codex-Spark" ? "Spark" : bucket.name }
-    func toggleSpark() { sparkExpanded.toggle(); onData?() }
     let motion = IslandPresentation()
     var islandProgress: Double {
         get { motion.progress }
@@ -152,8 +147,10 @@ import ResetCore
     let visibilitySettings = VisibilitySettings.shared
     private var recentUsageChange = false
     private var usageRevealTask: Task<Void, Never>?
+    var externalHoverOnly = false
     var indicatorRevealed: Bool {
-        IndicatorVisibility.shouldShow(alwaysOn: visibilitySettings.alwaysOn,
+        if externalHoverOnly { return !hoveredRegions.isEmpty || expanded || islandProgress > 0.001 }
+        return IndicatorVisibility.shouldShow(alwaysOn: visibilitySettings.alwaysOn,
             hovered: !hoveredRegions.isEmpty, expanded: expanded || islandProgress > 0.001,
             recentChange: visibilitySettings.revealChanges && recentUsageChange,
             activeAppSelected: visibilitySettings.activeAppSelected)
@@ -195,7 +192,7 @@ import ResetCore
     var menuTracking = false
     private var hoveredRegions = Set<String>()
     private var hoverIntent = false
-    var selected: LimitBucket? { visibleBuckets.first { $0.id == selectedID } ?? visibleBuckets.first }
+    var selected: LimitBucket? { buckets.first { $0.id == selectedID } ?? buckets.first }
     var window: LimitWindow? { selected?.constraining }
     var stale: Bool { lastUpdated.map { now.timeIntervalSince($0) > 150 } ?? true }
     var sourceFresh: Bool { !stale && error == nil }
@@ -273,8 +270,9 @@ import ResetCore
     }
     func dismiss() { hoverTask?.cancel(); hoverTask = nil; hoveredRegions.removeAll(); hoverIntent = false; setExpanded(false) }
     var detailHeight: CGFloat {
-        let groups = visibleBuckets.reduce(CGFloat(0)) { $0 + 33 + (isSpark($1) && !sparkExpanded ? 0 : CGFloat(max(1, displayWindows($1).count)) * 52) }
-        return min(600, dayCardHeight + (weeklyHistoryOpen ? 120 : 0) + 58 + max(62, groups) + (!weeklyHistoryOpen || displayedCreditDates.isEmpty ? 0 : displayedCreditDates.count == 1 ? 40 : 47 + CGFloat((displayedCreditDates.count + 2) / 3) * 38) + (error != nil ? 68 : 0))
+        if promptingOpen { return 78 + 32 + 300 }
+        let groups = buckets.reduce(CGFloat(0)) { $0 + 33 + CGFloat(max(1, displayWindows($1).count)) * 52 }
+        return 32 + min(600, dayCardHeight + (weeklyHistoryOpen ? 120 : 0) + 58 + max(62, groups) + (!weeklyHistoryOpen || displayedCreditDates.isEmpty ? 0 : 32) + (error != nil ? 68 : 0))
     }
     var islandHeight: CGFloat { detailHeight - 78 + notchSize.height - 7 }
     func toggleIndicator() {

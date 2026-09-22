@@ -78,6 +78,12 @@ public struct NotchGeometry: Equatable {
     public var frame: CGRect
     public var cutoutWidth: CGFloat
     public var cutoutHeight: CGFloat
+    /// Invisible activation anchor for a display without a hardware notch.
+    public init(hoverScreenFrame: CGRect) {
+        cutoutWidth = 200
+        cutoutHeight = 24
+        frame = CGRect(x: hoverScreenFrame.midX - 107, y: hoverScreenFrame.maxY - 31, width: 214, height: 31)
+    }
     public init?(screenFrame: CGRect, safeTop: CGFloat, leftArea: CGRect?, rightArea: CGRect?) {
         guard safeTop > 0, let leftArea, let rightArea, rightArea.minX > leftArea.maxX else { return nil }
         cutoutWidth = rightArea.minX - leftArea.maxX
@@ -85,6 +91,13 @@ public struct NotchGeometry: Equatable {
         frame = CGRect(x: leftArea.maxX - 7, y: screenFrame.maxY - safeTop - 7, width: cutoutWidth + 14, height: safeTop + 7)
     }
 }
+public enum CodexQuota {
+    /// Ignore the retired separate Spark allowance at every reporting boundary.
+    public static func includes(id: String, name: String = "") -> Bool {
+        !id.localizedCaseInsensitiveContains("spark") && !name.localizedCaseInsensitiveContains("spark")
+    }
+}
+
 public struct UsageResponse: Decodable, Sendable {
     public var rateLimits: LimitBucket?
     public var rateLimitsByLimitId: [String: LimitBucket]?
@@ -93,7 +106,7 @@ public struct UsageResponse: Decodable, Sendable {
         let items: [LimitBucket]
         if let map = rateLimitsByLimitId, !map.isEmpty { items = Array(map.values) }
         else { items = rateLimits.map { [$0] } ?? [] }
-        return items.sorted {
+        return items.filter { CodexQuota.includes(id: $0.id, name: $0.name) }.sorted {
             if $0.id == "codex" { return $1.id != "codex" }
             if $1.id == "codex" { return false }
             return $0.name < $1.name

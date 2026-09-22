@@ -8,6 +8,12 @@ final class UsageTests: XCTestCase {
         XCTAssertEqual(shape.cutoutWidth, 200)
         XCTAssertEqual(shape.frame, CGRect(x: 2377, y: 943, width: 214, height: 39))
     }
+    func testExternalHoverAnchorUsesDisplayTopCenter() {
+        let geometry = NotchGeometry(hoverScreenFrame: CGRect(x: -1920, y: 200, width: 1920, height: 1080))
+        XCTAssertEqual(geometry.frame.midX, -960)
+        XCTAssertEqual(geometry.frame.maxY, 1280)
+        XCTAssertEqual(geometry.frame.width, 214)
+    }
     func testNoNotchDoesNotInventCameraGeometry() {
         XCTAssertNil(NotchGeometry(screenFrame: CGRect(x: 0, y: 0, width: 1920, height: 1080), safeTop: 0, leftArea: nil, rightArea: nil))
     }
@@ -18,11 +24,22 @@ final class UsageTests: XCTestCase {
     func testPreferDistinctLimitMapAndDecodeSparseWindows() throws {
         let data = Data(#"{"rateLimits":{"limitId":"legacy","primary":{"usedPercent":5}},"rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{"usedPercent":99,"windowDurationMins":10080,"resetsAt":2000000000}},"spark":{"limitId":"spark","limitName":"Spark","primary":{"usedPercent":0,"windowDurationMins":300}}},"rateLimitResetCredits":{"availableCount":1}}"#.utf8)
         let value = try JSONDecoder().decode(UsageResponse.self, from: data)
-        XCTAssertEqual(value.buckets.map(\.id), ["codex", "spark"])
+        XCTAssertEqual(value.buckets.map(\.id), ["codex"])
         XCTAssertEqual(value.buckets[0].constraining?.remaining, 1)
         XCTAssertEqual(value.buckets[0].constraining?.name, "Weekly")
-        XCTAssertEqual(value.buckets[1].constraining?.remaining, 100)
         XCTAssertEqual(value.rateLimitResetCredits?.availableCount, 1)
+    }
+    func testSparkExcludedFromLegacyResponseAndHistoricalReports() throws {
+        let legacy = try JSONDecoder().decode(UsageResponse.self, from: Data(#"{"rateLimits":{"limitId":"special","limitName":"GPT-5.3-Codex-Spark","primary":{"usedPercent":15}}}"#.utf8))
+        XCTAssertTrue(legacy.buckets.isEmpty)
+        XCTAssertTrue(QuotaObservation.codexRecord(["limit_id": "spark", "primary": ["used_percent": 80, "window_minutes": 10080]], at: Date()).isEmpty)
+        var history = ResetHistory()
+        let start = Date(timeIntervalSince1970: 1000)
+        history.observe([
+            QuotaObservation(provider: .codex, bucketID: "spark", bucketName: "Spark", durationMinutes: 10080, used: 90, resetsAt: 2000, timestamp: start),
+            QuotaObservation(provider: .codex, bucketID: "spark", bucketName: "Spark", durationMinutes: 10080, used: 0, resetsAt: 3000, timestamp: start.addingTimeInterval(10))
+        ])
+        XCTAssertTrue(history.events.isEmpty)
     }
     func testUnknownIsNotZeroAndClampsProviderOverflow() throws {
         let unknown = try JSONDecoder().decode(UsageResponse.self, from: Data(#"{"rateLimits":{"limitId":"codex"}}"#.utf8))

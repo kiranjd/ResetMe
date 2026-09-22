@@ -94,12 +94,12 @@ spctl --assess --type open --context context:primary-signature --verbose=2 "$pen
 replace_output "$pending_zip" "$sparkle_zip"
 replace_output "$pending_dmg" "$dmg"
 
-readonly appcast_dir="$dist_dir/appcast"
+readonly appcast_dir="$work_dir/appcast"
 mkdir -p "$appcast_dir"
 ditto "$sparkle_zip" "$appcast_dir/ResetMe-macos.zip"
 readonly private_key="$work_dir/resetme-sparkle-private-key"
 umask 077
-"$generate_keys" --account resetme.sparkle -x "$private_key" >/dev/null
+"$generate_keys" --account "${SPARKLE_KEY_ACCOUNT:-resetme.sparkle}" -x "$private_key" >/dev/null
 SPARKLE_PRIVATE_KEY_FILE="$private_key" "$project_dir/scripts/generate-appcast.sh" "$appcast_dir" \
     "https://github.com/kiranjd/ResetMe/releases/download/v$version/" >/dev/null
 ditto "$appcast_dir/appcast.xml" "$work_dir/appcast.xml"

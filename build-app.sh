@@ -54,6 +54,24 @@ test -x "$staging/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle"
 otool -L "$staging/Contents/MacOS/reset" | grep -Fq '@rpath/Sparkle.framework/Versions/B/Sparkle'
 otool -l "$staging/Contents/MacOS/reset" | grep -Fq '@loader_path/../Frameworks'
 
+# Keep local preview identity stable across rebuilds.
+# Release packaging retains its existing signing/notarization sequence.
+preview_identity="${RESETME_PREVIEW_SIGN_IDENTITY:-}"
+if [[ -z "$preview_identity" && "$destination" == "$project_dir/work/"* ]]; then
+    preview_identity="Developer ID Application: Kiran Murthy Jd (MN4M99XHF7)"
+fi
+if [[ -n "$preview_identity" ]]; then
+    preview_framework="$staging/Contents/Frameworks/Sparkle.framework"
+    preview_version="$preview_framework/Versions/B"
+    codesign --force --timestamp --options runtime --sign "$preview_identity" "$preview_version/XPCServices/Installer.xpc"
+    codesign --force --timestamp --options runtime --preserve-metadata=entitlements --sign "$preview_identity" "$preview_version/XPCServices/Downloader.xpc"
+    codesign --force --timestamp --options runtime --sign "$preview_identity" "$preview_version/Autoupdate"
+    codesign --force --timestamp --options runtime --sign "$preview_identity" "$preview_version/Updater.app"
+    codesign --force --timestamp --options runtime --sign "$preview_identity" "$preview_framework"
+    codesign --force --timestamp --options runtime --sign "$preview_identity" "$staging"
+    codesign --verify --deep --strict --verbose=2 "$staging"
+fi
+
 if [[ -e "$destination" || -L "$destination" ]]; then
     mv "$destination" "$backup"
     had_existing=true

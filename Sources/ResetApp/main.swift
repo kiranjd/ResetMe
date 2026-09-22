@@ -38,6 +38,7 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     var menuActiveApp: VisibilityApp?
     var indicatorAlphaTarget: CGFloat = -1
     let notchAnimator = NotchAnimator()
+    private var externalHoverTimer: Timer?
     var lastPointer = NSEvent.mouseLocation
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -57,6 +58,14 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
             self.store.islandProgress = progress
             self.updateNotchInteractivity()
             self.updateIndicatorAppearance()
+            if progress <= 0.001 && self.store.externalHoverOnly && !self.store.expanded,
+               !(self.visibleNotchFrame?.insetBy(dx: -12, dy: -10).contains(self.lastPointer) ?? false),
+               NSScreen.screens.contains(where: { $0.safeAreaInsets.top > 0 }) {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.store.externalHoverOnly, !self.store.expanded, self.store.islandProgress <= 0.001 else { return }
+                    self.place()
+                }
+            }
         }
         store.onExpand = { [weak self] _ in self?.resize() }
         store.onData = { [weak self] in self?.resize(animated: false) }
@@ -120,6 +129,16 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
             self.statusItem.isVisible = self.store.visibilitySettings.showInMenuBar
         }
         place(); store.refresh()
+        // Menu-bar and transparent-window areas do not reliably deliver mouseMoved.
+        let hoverTimer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, NSScreen.screens.contains(where: { $0.safeAreaInsets.top == 0 }) else { return }
+                self.updateHover(at: NSEvent.mouseLocation)
+            }
+        }
+        externalHoverTimer = hoverTimer
+        RunLoop.main.add(hoverTimer, forMode: .common)
+        if CommandLine.arguments.contains("--prompting") { store.showPrompting(true) }
         if CommandLine.arguments.contains("--settings") { showSettings() }
         if CommandLine.arguments.contains("--tune-reflections") { SceneSettings.shared.applyReflectionTune() }
         if CommandLine.arguments.contains("--hanging-light") {
@@ -153,11 +172,13 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         if let screenID, let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value == screenID }) { return screen }
         return NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) ?? NSScreen.main ?? NSScreen.screens[0]
     }
-    func place() {
-        let screen = targetScreen()
+    func place(on requestedScreen: NSScreen? = nil) {
+        let screen = requestedScreen ?? targetScreen()
         screenID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         notchGeometry = NotchGeometry(screenFrame: screen.frame, safeTop: screen.safeAreaInsets.top, leftArea: screen.auxiliaryTopLeftArea, rightArea: screen.auxiliaryTopRightArea)
-        store.hasNotch = notchGeometry != nil
+        store.externalHoverOnly = notchGeometry == nil
+        if notchGeometry == nil { notchGeometry = NotchGeometry(hoverScreenFrame: screen.frame) }
+        store.hasNotch = true
         if let geometry = notchGeometry {
             store.notchSize = geometry.frame.size
             notchPanel.setFrame(IslandMotion.canvasFrame(geometry.frame), display: true)
@@ -167,8 +188,23 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     func updateHover(at point: NSPoint) {
         lastPointer = point
         guard !store.indicatorHidden else { return }
+        // External displays have only an invisible top-center activation strip.
+        if let screen = NSScreen.screens.first(where: { screen in
+            screen.safeAreaInsets.top == 0 && CGRect(x: screen.frame.midX - 107, y: screen.frame.maxY - 28, width: 214, height: 29).contains(point)
+        }), screenID != (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value {
+            store.dismiss()
+            place(on: screen)
+        } else if store.externalHoverOnly && !store.expanded && store.islandProgress <= 0.001,
+                  !(visibleNotchFrame?.insetBy(dx: -12, dy: -10).contains(point) ?? false),
+                  NSScreen.screens.contains(where: { $0.safeAreaInsets.top > 0 }) {
+            place()
+        }
         updateNotchInteractivity()
-        let nearNotch = store.hasNotch && (visibleNotchFrame?.insetBy(dx: -12, dy: -10).contains(point) ?? false)
+        let activationFrame: CGRect?
+        if store.externalHoverOnly && !store.expanded && store.islandProgress <= 0.001, let frame = notchGeometry?.frame {
+            activationFrame = CGRect(x: frame.minX, y: frame.maxY - 28, width: frame.width, height: 29)
+        } else { activationFrame = visibleNotchFrame?.insetBy(dx: -12, dy: -10) }
+        let nearNotch = activationFrame?.contains(point) ?? false
         store.hover(nearNotch, region: "notch")
     }
     var visibleNotchFrame: CGRect? {
@@ -192,7 +228,7 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
         guard !store.indicatorHidden, notchGeometry != nil else {
             notchAnimator.stop(); notchPanel.orderOut(nil); return
         }
-        let shouldAnimate = (animated || notchAnimator.isRunning) && notchPanel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let shouldAnimate = !store.externalHoverOnly && (animated || notchAnimator.isRunning) && notchPanel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         notchAnimator.move(to: store.expanded ? 1 : 0, animated: shouldAnimate)
         updateIndicatorAppearance()
         updateNotchInteractivity()
@@ -225,6 +261,7 @@ final class TrackingHost<Content: View>: NSHostingView<Content> {
     @objc func checkForUpdates() { AppUpdater.shared.checkForUpdates() }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationWillTerminate(_ notification: Notification) {
+        externalHoverTimer?.invalidate()
         MacTilt.shared.stop()
         store.shutdown()
         notchAnimator.stop()
