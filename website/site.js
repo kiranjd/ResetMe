@@ -20,3 +20,24 @@ trigger?.addEventListener('click', event => {
 trigger?.addEventListener('blur', () => setNotchOpen(false));
 document.addEventListener('keydown', event => { if (event.key === 'Escape') setNotchOpen(false); });
 document.addEventListener('pointerdown', event => { if (!notch?.contains(event.target)) setNotchOpen(false); });
+
+const previewTabs = [...document.querySelectorAll('.panel-tabs [role="tab"]')];
+const selectPreviewTab = tab => {
+  for (const item of previewTabs) {
+    const selected = item === tab;
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    document.getElementById(item.getAttribute('aria-controls')).hidden = !selected;
+  }
+};
+for (const tab of previewTabs) {
+  tab.addEventListener('click', () => selectPreviewTab(tab));
+  tab.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const index = previewTabs.indexOf(tab);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? previewTabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + previewTabs.length) % previewTabs.length;
+    selectPreviewTab(previewTabs[next]);
+    previewTabs[next].focus();
+  });
+}
