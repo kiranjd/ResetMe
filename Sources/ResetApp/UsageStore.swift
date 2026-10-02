@@ -196,21 +196,22 @@ import ResetCore
     var window: LimitWindow? { selected?.constraining }
     var stale: Bool { lastUpdated.map { now.timeIntervalSince($0) > 150 } ?? true }
     var sourceFresh: Bool { !stale && error == nil }
-    var usable: Bool { sourceFresh && window != nil }
+    var usable: Bool { window != nil }
+    var showsStaleStatus: Bool { error != nil || (lastUpdated != nil && stale) }
     var tint: Color { !usable ? Color.secondary : ((window?.remaining ?? 0) <= 10 ? BrandPalette.sand : BrandPalette.cream) }
     var sharedFiveHour: LimitWindow? {
-        guard sourceFresh, let main = buckets.first(where: { $0.id == provider.rawValue }) ?? buckets.first else { return nil }
+        guard let main = buckets.first(where: { $0.id == provider.rawValue }) ?? buckets.first else { return nil }
         return main.windows.first(where: { $0.windowDurationMins == 300 }) ?? main.constraining
     }
     var remainingText: String { usable ? "\(Int(window!.remaining.rounded()))%" : "—" }
     var freshness: String {
         guard let lastUpdated else { return refreshing ? "Connecting" : "Unavailable" }
-        if error != nil { return "Refresh failed" }
+        if error != nil { return "Refresh failed. Last updated " + lastUpdated.formatted(date: .omitted, time: .shortened) }
         let seconds = Int(now.timeIntervalSince(lastUpdated))
         return seconds < 60 ? "\(max(0, seconds))s ago" : "\(seconds / 60)m ago"
     }
     var pace: Double? {
-        guard usable, let selected, let window else { return nil }
+        guard sourceFresh, let selected, let window else { return nil }
         return UsageMath.pointsPerHour(samples: samples.filter { now.timeIntervalSince($0.timestamp) <= 3600 }, bucketID: selected.id, resetAt: window.resetsAt)
     }
     init() {
@@ -382,7 +383,10 @@ import ResetCore
     private func accept(_ snapshot: ProviderUsageSnapshot) {
         guard snapshot.provider == provider else { return }
         retryNotBefore[provider] = nil
-        resetHistory.observe(QuotaObservation.snapshot(snapshot, at: Date())); saveResetHistory()
+        let observedAt = Date()
+        resetHistory.observe(QuotaObservation.snapshot(snapshot, at: observedAt))
+        resetHistory.observeCredits(snapshot.credits, provider: snapshot.provider, at: observedAt)
+        saveResetHistory()
         let changed = IndicatorVisibility.usageChanged(from: buckets, to: snapshot.buckets)
         buckets = snapshot.buckets; credits = snapshot.credits
         if changed { revealUsageChange() }

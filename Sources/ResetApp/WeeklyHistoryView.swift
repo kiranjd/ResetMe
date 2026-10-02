@@ -93,11 +93,16 @@ struct WeeklyHistoryView: View {
         }
         let boundaries = Set(indices.filter { $0 > 0 && $0 < visibleCount })
         let resetGap: CGFloat = boundaries.isEmpty ? 0 : min(CGFloat(scene["resetGap"]), width * 0.22 / CGFloat(boundaries.count))
-        let barWidth = min(barWidth, max(1, (width - resetGap * CGFloat(boundaries.count) - 3 * CGFloat(visibleCount - 1)) / CGFloat(visibleCount)))
-        let step: CGFloat = max(0, width - barWidth - resetGap * CGFloat(boundaries.count)) / CGFloat(visibleCount - 1)
+        let gaps = Dictionary(uniqueKeysWithValues: zip(groups, indices).compactMap { group, index -> (Int, CGFloat)? in
+            guard boundaries.contains(index) else { return nil }
+            return (index, group.events.isEmpty ? min(resetGap, 3) : resetGap)
+        })
+        let totalGap = gaps.values.reduce(0, +)
+        let barWidth = min(barWidth, max(1, (width - totalGap - 3 * CGFloat(visibleCount - 1)) / CGFloat(visibleCount)))
+        let step: CGFloat = max(0, width - barWidth - totalGap) / CGFloat(visibleCount - 1)
         var centers: [CGFloat] = []
         for index in 0..<visibleCount {
-            let offset = CGFloat(boundaries.filter { $0 <= index }.count) * resetGap
+            let offset = gaps.filter { $0.key <= index }.values.reduce(0, +)
             centers.append(CGFloat(index) * step + barWidth * 0.5 + offset)
         }
         var markers: [ResetPosition] = []
@@ -158,9 +163,9 @@ struct WeeklyHistoryView: View {
                         .accessibilityAction(named: "Open day details") { store.pinDay(day) }
                 }
                 ForEach(markers) { marker in
-                    ResetBoundaryMarker(count: marker.group.events.count)
+                    ResetBoundaryMarker(count: marker.group.events.count, creditCount: marker.group.creditGrants.count)
                         .position(x: marker.x, y: 36)
-                        .help("\(marker.group.events.count) weekly reset(s) · \(marker.group.date.formatted(date: .abbreviated, time: .omitted))")
+                        .help("\(marker.group.events.count) weekly reset(s), \(marker.group.creditGrants.count) banked reset(s) added · \(marker.group.date.formatted(date: .abbreviated, time: .omitted))")
                 }
                 if store.historyLoading && store.tokenDays.isEmpty {
                     Text("Loading history").font(.system(size: 9)).foregroundStyle(.secondary).position(x: width / 2, y: 36)
@@ -196,27 +201,43 @@ struct WeeklyHistoryView: View {
         }
     }
     private var resetHoverWidth: CGFloat {
-        hoveredResetDay?.events.contains(where: { $0.kind == .scheduled }) == true ? 156 : 124
+        guard let group = hoveredResetDay else { return 124 }
+        return !group.creditGrants.isEmpty || group.events.contains(where: { $0.kind == .scheduled }) ? 176 : 124
     }
     private var resetHoverHeight: CGFloat {
-        let count = hoveredResetDay?.events.count ?? 1
+        let count = (hoveredResetDay?.events.count ?? 0) + (hoveredResetDay?.creditGrants.count ?? 0)
         return CGFloat(count * 30 + (count > 1 ? 22 : 10))
     }
     private var resetHoverContent: AnyView? {
         guard let group = hoveredResetDay else { return nil }
         return AnyView(VStack(alignment: .leading, spacing: 6) {
-            if group.events.count > 1 {
-                Text("\(group.events.count) weekly resets").font(.system(size: 10, weight: .semibold))
+            if group.events.count + group.creditGrants.count > 1 {
+                Text(group.creditGrants.isEmpty ? "\(group.events.count) weekly resets" :
+                     group.events.isEmpty ? "\(group.creditGrants.count) resets banked" :
+                     "\(group.events.count) reset · +\(group.creditGrants.count) banked")
+                    .font(.system(size: 10, weight: .semibold))
             }
             ForEach(group.events) { event in
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.counterclockwise.circle.fill").foregroundStyle(scene.color("reset"))
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "arrow.counterclockwise.circle.fill").foregroundStyle(scene.color("reset"))
+                        .font(.system(size: 10)).frame(width: 12)
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(event.kind == .scheduled ? "Scheduled weekly reset" : "Reset")
-                            .fontWeight(.semibold)
-                    }.font(.system(size: 10))
-                    Text(event.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
-                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(event.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            ForEach(group.creditGrants) { grant in
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "ticket.fill").foregroundStyle(BrandPalette.cream)
+                        .font(.system(size: 10)).frame(width: 12)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Banked reset added").font(.system(size: 10, weight: .semibold))
+                        Text(grant.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }.padding(6).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -268,25 +289,27 @@ struct WeeklyHistoryView: View {
     private var resetDays: [ResetDay] {
         guard let start = store.tokenDays.dropFirst(firstIndex).first?.date,
               let end = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: store.now)) else { return [] }
-        return ResetDay.groups(store.resetHistory.events, provider: store.provider, start: start, end: end)
+        return ResetDay.groups(store.resetHistory.events, credits: store.resetHistory.creditGrants,
+                               provider: store.provider, start: start, end: end)
     }
 }
 
 
 private struct ResetBoundaryMarker: View {
     var count: Int
+    var creditCount: Int
     @ObservedObject private var scene = SceneSettings.shared
     private var green: Color { scene.color("reset") }
     var body: some View {
         ZStack(alignment: .top) {
-            Capsule()
-                .fill(LinearGradient(colors: [green.opacity(0.85), green.opacity(0.65), green], startPoint: .leading, endPoint: .trailing))
-                .frame(width: scene["resetWidth"], height: 72-scene["resetSize"]+3)
-                .overlay(alignment: .leading) {
-                    Capsule().fill(BrandPalette.cream.opacity(0.5)).frame(width: 0.5).padding(.vertical, 1)
-                }
-                .offset(y: scene["resetSize"]-3)
-            Group {
+            Path { path in
+                path.move(to: CGPoint(x: scene["resetSize"] / 2, y: scene["resetSize"] + 2))
+                path.addLine(to: CGPoint(x: scene["resetSize"] / 2, y: 72))
+            }
+            .stroke(count > 0 ? green.opacity(0.85) : BrandPalette.cream.opacity(0.5),
+                    style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [1, 3]))
+            .frame(width: scene["resetSize"], height: 72)
+            if count > 0 { Group {
                 if count > 1 { Text(count > 9 ? "9+" : String(count)) }
                 else { Image(systemName: "arrow.clockwise") }
             }
@@ -297,9 +320,18 @@ private struct ResetBoundaryMarker: View {
                     Circle().fill(LinearGradient(colors: [green.opacity(0.75), green], startPoint: .topLeading, endPoint: .bottomTrailing))
                 }
                 .overlay { Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.5) }
+            }
+            if creditCount > 0 {
+                Image(systemName: "ticket.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(BrandPalette.cream)
+                    .frame(width: scene["resetSize"], height: scene["resetSize"])
+                    .offset(y: count > 0 ? scene["resetSize"] + 3 : 0)
+            }
         }
         .frame(width: scene["resetSize"], height: 72, alignment: .top)
-        .accessibilityLabel("\(count) quota reset\(count == 1 ? "" : "s")")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(count) quota reset\(count == 1 ? "" : "s"), \(creditCount) banked reset\(creditCount == 1 ? "" : "s") added")
     }
 }
 

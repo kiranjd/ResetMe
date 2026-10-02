@@ -104,6 +104,52 @@ final class ResetHistoryTests: XCTestCase {
         XCTAssertEqual(history.events.count, 1)
         XCTAssertEqual(history.events.first?.detectedAt, origin.addingTimeInterval(101))
     }
+    func testLiveAndBackfillTwelveSecondDriftCountOneResetInEitherOrder() {
+        let backfill = ResetHistory.recovered(from: [observation(-1000, used: 90, end: week - 100, source: .codexHistory),
+            observation(113, used: 0, end: week + 100, source: .codexHistory)])
+        let live = ResetHistory.recovered(from: [observation(-500, used: 90, end: week - 100),
+            observation(119, used: 0, end: week + 112)])
+        for batches in [[backfill, live], [live, backfill]] {
+            var history = ResetHistory()
+            for batch in batches { history.merge(batch) }
+            history.merge(live); history.merge(backfill)
+            XCTAssertEqual(history.events.count, 1)
+            XCTAssertEqual(history.events.first?.date, origin.addingTimeInterval(100))
+        }
+    }
+    func testCloseButSeparatelyObservedResetsStaySeparate() {
+        let values = [observation(0, used: 90, end: week), observation(100, used: 0, end: week + 100),
+                      observation(105, used: 90, end: week + 100), observation(112, used: 0, end: week + 112)]
+        XCTAssertEqual(ResetHistory.recovered(from: values).count, 2)
+    }
+    func testScheduledBoundaryDriftMergesDespiteLaterNextWindowStart() {
+        let live = ResetHistory.recovered(from: [observation(0, used: 90, end: 100), observation(101, used: 0, end: week + 100)])
+        let backfill = ResetHistory.recovered(from: [observation(-1000, used: 90, end: 154, source: .codexHistory),
+            observation(12_800, used: 1, end: week + 12_708, source: .codexHistory)])
+        var history = ResetHistory(); history.merge(live); history.merge(backfill)
+        XCTAssertEqual(history.events.count, 1)
+        XCTAssertEqual(history.events.first?.date, origin.addingTimeInterval(100))
+    }
+    func testDecodingOldHistoryRepairsDuplicatesAndPreservesBaseline() throws {
+        var original = ResetHistory()
+        original.observe([observation(0, used: 90, end: week), observation(113, used: 0, end: week + 100)])
+        let duplicate = ResetHistory.recovered(from: [observation(-100, used: 90, end: week), observation(119, used: 0, end: week + 112)])
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        object["events"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(original.events + duplicate))
+        object.removeValue(forKey: "creditGrants") // The deployed V1 format.
+        var restored = try JSONDecoder().decode(ResetHistory.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(restored.events.count, 1)
+        XCTAssertTrue(restored.creditGrants.isEmpty)
+        restored.observe([observation(200, used: 80, end: week + 100), observation(220, used: 0, end: week + 220)])
+        XCTAssertEqual(restored.events.count, 2)
+    }
+    func testDistantBoundariesAndDistinctBucketsDoNotMerge() {
+        let first = ResetHistory.recovered(from: [observation(0, used: 90, end: week), observation(500, used: 0, end: week + 100)])
+        let later = ResetHistory.recovered(from: [observation(0, used: 90, end: week), observation(500, used: 0, end: week + 161)])
+        var other = first[0]; other.bucketID = "other"; other.id = "other"
+        var history = ResetHistory(); history.merge(first + later + [other])
+        XCTAssertEqual(history.events.count, 3)
+    }
     func testBackfillCanResolveAnUnknownRestorationWithoutCountingItTwice() {
         let observed = ResetHistory.recovered(from: [observation(0, used: 90, end: nil), observation(200, used: 10, end: week + 100)])
         let recovered = ResetHistory.recovered(from: [observation(0, used: 90, end: week, source: .codexHistory), observation(150, used: 10, end: week + 100, source: .codexHistory)])

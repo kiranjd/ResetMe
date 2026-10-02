@@ -86,15 +86,15 @@ final class SceneSettings: ObservableObject {
         values = values.filter { $0.value.isFinite }
         // Replace the earlier color experiment once, preserving scalar tuning and
         // a recoverable copy of the old colors. Later color edits remain respected.
-        if !defaults.bool(forKey: "leafPalette.v1") {
+        if !defaults.bool(forKey: "olivePaletteRestored.v1") {
             let colorKeys = Set(["bar", "dot", "accent", "background", "reset"].flatMap { prefix in
                 ["R", "G", "B"].map { prefix + $0 }
             })
             let previous = values.filter { colorKeys.contains($0.key) }
-            if !previous.isEmpty { defaults.set(previous, forKey: "opticalScene.beforeLeafPalette.v1") }
+            if !previous.isEmpty { defaults.set(previous, forKey: "opticalScene.beforeOliveRestored.v1") }
             values = values.filter { !colorKeys.contains($0.key) }
             defaults.set(values, forKey: Self.storageKey)
-            defaults.set(true, forKey: "leafPalette.v1")
+            defaults.set(true, forKey: "olivePaletteRestored.v1")
         }
 
         if !defaults.bool(forKey: "softHangingLight.v1") {

@@ -30,6 +30,7 @@ import ResetCore
 struct PromptingView: View {
     @ObservedObject var store: PromptingStore
     private var day: PromptingDay? { store.day }
+    private var initialLoading: Bool { store.snapshot == nil }
     private var screenTimeBlocked: Bool { store.snapshot?.screenTimeAccessDenied == true }
     private var contextValue: String {
         if let average = ContextMetrics.average(store.contextHours) { return average.formatted(.number.precision(.fractionLength(0...1))) }
@@ -63,9 +64,23 @@ struct PromptingView: View {
                     Text(dateTitle).font(.system(size: 12, weight: .medium)).frame(height: 28)
                 }.buttonStyle(.plain).help("Return to today")
                 Spacer()
-                dayButton("chevron.left", label: "Previous day", disabled: store.dayOffset >= 6) { store.dayOffset += 1 }
-                dayButton("chevron.right", label: "Next day", disabled: store.dayOffset == 0) { store.dayOffset -= 1 }
+                if store.loading && !initialLoading {
+                    ProgressView().controlSize(.mini).accessibilityLabel("Refreshing activity")
+                }
+                dayButton("chevron.left", label: "Previous day", disabled: initialLoading || store.dayOffset >= 6) { store.dayOffset += 1 }
+                dayButton("chevron.right", label: "Next day", disabled: initialLoading || store.dayOffset == 0) { store.dayOffset -= 1 }
             }
+            if initialLoading {
+                VStack(spacing: 12) {
+                    ProgressView().controlSize(.small).tint(BrandPalette.cream)
+                    Text("Loading your activity").font(.system(size: 14, weight: .medium))
+                    Text("Reading local Codex history")
+                        .font(.system(size: 11)).foregroundStyle(BrandPalette.cream.opacity(0.6))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Loading your activity. Reading local Codex history.")
+            } else {
             HStack(alignment: .center, spacing: 12) {
                 Text(time(day?.codexSeconds)).font(.system(size: 34, weight: .medium, design: .rounded)).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.8)
@@ -91,6 +106,7 @@ struct PromptingView: View {
             .background(BrandPalette.forest.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(BrandPalette.cream.opacity(0.12), lineWidth: 1))
             Spacer(minLength: 0)
+            }
         }
         .foregroundStyle(BrandPalette.cream)
         .padding(.horizontal, 22).padding(.bottom, 16)

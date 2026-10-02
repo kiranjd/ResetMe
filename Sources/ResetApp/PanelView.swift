@@ -24,6 +24,10 @@ struct IslandOutline: Shape {
 
 /// One screen-edge surface. The camera cutout is absorbed by its black background.
 struct IslandView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var tabIndicator
+    private var tabAnimation: Animation? { reduceMotion ? nil : .easeInOut(duration: 0.22) }
+
     @ObservedObject private var scene = SceneSettings.shared
     @ObservedObject var store: UsageStore
     @ObservedObject var motion: IslandPresentation
@@ -53,8 +57,14 @@ struct IslandView: View {
                         Spacer()
                         Button { if store.promptingOpen { store.prompting.refresh() } else { store.refresh() } } label: {
                             Image(systemName: "arrow.clockwise").font(.system(size: 10)).frame(width: 20, height: 24).matteContentShade()
+                                .overlay(alignment: .topTrailing) {
+                                    if !store.promptingOpen && store.showsStaleStatus {
+                                        Circle().fill(BrandPalette.sand).frame(width: 4, height: 4)
+                                            .accessibilityHidden(true)
+                                    }
+                                }
                         }.buttonStyle(.plain).disabled(store.refreshing && !store.promptingOpen)
-                            .accessibilityLabel(store.promptingOpen ? "Refresh prompting" : "Refresh usage").help(store.promptingOpen ? "Refresh local prompting history" : store.freshness)
+                            .accessibilityLabel(store.promptingOpen ? "Refresh prompting" : store.showsStaleStatus ? "Refresh usage, showing last known data" : "Refresh usage").help(store.promptingOpen ? "Refresh local prompting history" : store.freshness)
                         Menu {
                             Button(store.indicatorHidden ? "Show ResetMe" : "Hide ResetMe") { store.toggleIndicator() }
                             Button("Settings…") { store.dismiss(); store.visibilitySettings.show() }
@@ -70,8 +80,19 @@ struct IslandView: View {
                         surfaceTab("Prompting", prompting: true)
                         Spacer()
                     }.padding(.horizontal, 22).frame(height: 32)
-                    if store.promptingOpen { PromptingView(store: store.prompting) }
-                    else { PanelView(store: store) }
+                        .animation(tabAnimation, value: store.promptingOpen)
+                    ZStack(alignment: .top) {
+                        if store.promptingOpen {
+                            PromptingView(store: store.prompting)
+                                .transition(reduceMotion ? .identity : .offset(x: 10).combined(with: .opacity))
+                        } else {
+                            PanelView(store: store)
+                                .transition(reduceMotion ? .identity : .offset(x: -10).combined(with: .opacity))
+                        }
+                    }
+                    .frame(height: store.promptingOpen ? 300 : store.detailHeight - 78 - 32, alignment: .top)
+                    .clipped()
+                    .animation(tabAnimation, value: store.promptingOpen)
                 }.frame(width: 348, alignment: .top)
                     .opacity(reveal)
                     .blur(radius: 5 * (1 - reveal))
@@ -115,7 +136,13 @@ struct IslandView: View {
                         .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                         .opacity(1 - lineOpacity)
                     if !store.expanded {
-                        Text(value.map { "\(Int($0.remaining.rounded()))%" } ?? "—")
+                        HStack(spacing: 3) {
+                            Text(value.map { "\(Int($0.remaining.rounded()))%" } ?? "—")
+                            if store.showsStaleStatus {
+                                Circle().fill(BrandPalette.sand).frame(width: 3, height: 3)
+                            }
+                        }
+                            .accessibilityLabel(store.showsStaleStatus ? "\(store.remainingText), last known usage. \(store.freshness)" : store.remainingText)
                             .font(.custom("Menlo-Bold", size: 11))
                             .foregroundStyle(color)
                             .opacity(1 - IslandMotion.smooth(progress / 0.25))
@@ -138,7 +165,13 @@ struct IslandView: View {
         Button { store.showPrompting(prompting) } label: {
             VStack(spacing: 5) {
                 Text(title).font(.system(size: 11, weight: .medium))
-                Capsule().fill(store.promptingOpen == prompting ? BrandPalette.cream.opacity(0.65) : .clear).frame(height: 1.5)
+                ZStack {
+                    Color.clear
+                    if store.promptingOpen == prompting {
+                        Capsule().fill(BrandPalette.cream.opacity(0.65))
+                            .matchedGeometryEffect(id: "selected-tab", in: tabIndicator)
+                    }
+                }.frame(height: 1.5)
             }.fixedSize(horizontal: true, vertical: false).frame(height: 28).contentShape(Rectangle())
         }.buttonStyle(.plain)
             .foregroundStyle(BrandPalette.cream.opacity(store.promptingOpen == prompting ? 0.95 : 0.45))
@@ -203,18 +236,21 @@ struct PanelView: View {
     }
     var bankedResets: some View {
         HStack(spacing: 7) {
-            Image(systemName: "clock").font(.system(size: 11))
-            Text("Expires in").foregroundStyle(.secondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(Array(store.displayedCreditDates.enumerated()), id: \.offset) { index, expiry in
-                        if index > 0 { Text("·").foregroundStyle(.secondary) }
-                        Text(resetExpiry(expiry))
-                            .help(expiry?.formatted(date: .complete, time: .shortened) ?? "Expiry unavailable")
-                            .accessibilityLabel("Banked reset \(index + 1), expires in \(resetExpiry(expiry))")
-                    }
+            Image(systemName: "ticket.fill").font(.system(size: 14)).accessibilityHidden(true)
+            Text("\(store.displayedCreditDates.count) banked reset\(store.displayedCreditDates.count == 1 ? "" : "s")")
+                .fixedSize()
+            Spacer(minLength: 0)
+            Text(store.displayedCreditDates.count == 1 ? "Expires in" : "Expire in")
+                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize()
+            HStack(spacing: 6) {
+                ForEach(Array(store.displayedCreditDates.enumerated()), id: \.offset) { index, expiry in
+                    if index > 0 { Text("·").foregroundStyle(.secondary) }
+                    Text(resetExpiry(expiry))
+                        .help(expiry?.formatted(date: .complete, time: .shortened) ?? "Expiry unavailable")
+                        .accessibilityLabel("Banked reset \(index + 1), expires in \(resetExpiry(expiry))")
                 }
-            }.fixedSize(horizontal: false, vertical: true)
+            }.font(.system(size: 10, weight: .medium))
+                .fixedSize()
         }
         .font(.system(size: 11, weight: .medium)).monospacedDigit()
         .foregroundStyle(themeAccent).frame(height: 32)
@@ -252,7 +288,7 @@ struct PanelView: View {
                 VStack(alignment: .leading, spacing: 9) {
                     HStack(spacing: 4) {
                         Text(window.name).font(.system(size: 13, weight: .semibold))
-                        Text(store.sourceFresh ? "\(Int(window.remaining.rounded()))%" : "—")
+                        Text("\(Int(window.remaining.rounded()))%")
                             .font(.custom("Menlo-Bold", size: 13))
                         Text("left").font(.system(size: 13, weight: .semibold))
                         Spacer(minLength: 6)
@@ -263,7 +299,7 @@ struct PanelView: View {
                     GeometryReader { proxy in
                         Capsule().fill(BrandPalette.cream.opacity(0.12)).overlay(alignment: .leading) {
                             Capsule().fill(window.remaining <= 10 ? BrandPalette.sand : themeAccent)
-                                .frame(width: store.sourceFresh ? proxy.size.width * window.remaining / 100 : 0)
+                                .frame(width: proxy.size.width * window.remaining / 100)
                         }
                     }.frame(height: 5).matteContentShade(spread: 5)
                         .opacity(bucket.id == store.provider.rawValue && window.windowDurationMins == store.sharedFiveHour?.windowDurationMins ? 0 : 1)

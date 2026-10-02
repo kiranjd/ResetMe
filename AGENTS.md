@@ -1,3 +1,3 @@
 # ResetMe
 
-Read [DEVELOPMENT.md](DEVELOPMENT.md) for setup, architecture, provider contracts, and verification. Preserve existing work and keep credentials and private session content out of output and commits.
+Use [DEVELOPMENT.md](DEVELOPMENT.md) when setup, architecture, provider contracts or verification details are needed. Preserve existing work and keep credentials and private session content out of output and commits.
