@@ -91,9 +91,37 @@ public struct QuotaResetEvent: Codable, Identifiable, Equatable, Sendable {
 /// resets during offline gaps, and never infer a manual action from a percentage alone.
 public struct ResetHistory: Codable, Sendable {
     public private(set) var events: [QuotaResetEvent] = []
+    public private(set) var creditGrants: [ResetCreditGrant] = []
     private var baselines: [String: QuotaObservation] = [:]
     private static let deadlineTolerance: Double = 5
+    /// Independent live/backfill snapshots can disagree on the same boundary by
+    /// seconds. Only reconcile this wider drift when observation intervals overlap.
+    private static let reconciliationTolerance: Double = 60
     public init() {}
+
+    private enum CodingKeys: String, CodingKey { case events, baselines, creditGrants }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        baselines = try values.decodeIfPresent([String: QuotaObservation].self, forKey: .baselines) ?? [:]
+        creditGrants = try values.decodeIfPresent([ResetCreditGrant].self, forKey: .creditGrants) ?? []
+        // Repair already-persisted duplicate observations without losing baselines.
+        let saved = try values.decodeIfPresent([QuotaResetEvent].self, forKey: .events) ?? []
+        merge(saved.sorted { $0.detectedAt < $1.detectedAt })
+    }
+
+    public mutating func observeCredits(_ credits: ResetCredits?, provider: UsageProvider, at now: Date) {
+        guard provider == .codex else { return }
+        for credit in credits?.credits ?? [] {
+            guard let id = credit.id, !id.isEmpty,
+                  credit.resetType == nil || credit.resetType == "codexRateLimits",
+                  let grantedAt = credit.grantedAt, grantedAt.isFinite, grantedAt > 0,
+                  grantedAt <= now.timeIntervalSince1970 + Self.deadlineTolerance else { continue }
+            let key = "\(provider.rawValue)|\(id)"
+            guard !creditGrants.contains(where: { $0.id == key }) else { continue }
+            creditGrants.append(ResetCreditGrant(id: key, provider: provider, date: Date(timeIntervalSince1970: grantedAt)))
+        }
+        creditGrants.sort { $0.date == $1.date ? $0.id < $1.id : $0.date < $1.date }
+    }
 
     public mutating func observe(_ observations: [QuotaObservation]) {
         for current in observations.sorted(by: { $0.timestamp < $1.timestamp }) {
@@ -137,6 +165,15 @@ public struct ResetHistory: Codable, Sendable {
     private static func sameReset(_ a: QuotaResetEvent, _ b: QuotaResetEvent) -> Bool {
         guard a.provider == b.provider, a.bucketID == b.bucketID, a.durationMinutes == b.durationMinutes else { return false }
         if a.kind == .allowanceRestored && b.kind == .allowanceRestored { return a.id == b.id }
+        if a.kind == b.kind,
+           abs(a.date.timeIntervalSince(b.date)) <= reconciliationTolerance,
+           max(a.previousObservation, b.previousObservation) < min(a.detectedAt, b.detectedAt) {
+            // Scheduled boundaries identify the reset even if the next window only
+            // starts with a later request. Early resets additionally need nearby ends.
+            if a.kind == .scheduled { return true }
+            if let aEnd = a.nextResetAt, let bEnd = b.nextResetAt,
+               abs(aEnd - bEnd) <= reconciliationTolerance { return true }
+        }
         guard let aEnd = a.nextResetAt, let bEnd = b.nextResetAt else { return a.id == b.id }
         guard abs(aEnd - bEnd) <= deadlineTolerance else { return false }
         if a.kind == .allowanceRestored || b.kind == .allowanceRestored {
@@ -180,14 +217,25 @@ public struct ResetHistory: Codable, Sendable {
     }
 }
 
+/// A provider-reported credit grant is an arrival in the bank, never a reset use.
+public struct ResetCreditGrant: Codable, Identifiable, Equatable, Sendable {
+    public var id: String
+    public var provider: UsageProvider
+    public var date: Date
+}
+
 public struct ResetDay: Identifiable, Sendable {
     public var date: Date
     public var events: [QuotaResetEvent]
+    public var creditGrants: [ResetCreditGrant] = []
     public var id: Date { date }
-    public static func groups(_ events: [QuotaResetEvent], provider: UsageProvider, start: Date, end: Date, calendar: Calendar = .current) -> [Self] {
+    public static func groups(_ events: [QuotaResetEvent], credits: [ResetCreditGrant] = [], provider: UsageProvider, start: Date, end: Date, calendar: Calendar = .current) -> [Self] {
         let filtered = events.filter { ($0.provider != .codex || CodexQuota.includes(id: $0.bucketID, name: $0.bucketName)) && $0.provider == provider && $0.durationMinutes == 10_080 && $0.date >= start && $0.date < end }
-        return Dictionary(grouping: filtered, by: { calendar.startOfDay(for: $0.date) })
-            .map { Self(date: $0.key, events: $0.value.sorted { $0.date < $1.date }) }
-            .sorted { $0.date < $1.date }
+        let resetsByDay = Dictionary(grouping: filtered, by: { calendar.startOfDay(for: $0.date) })
+        let creditsByDay = Dictionary(grouping: credits.filter { $0.provider == provider && $0.date >= start && $0.date < end }, by: { calendar.startOfDay(for: $0.date) })
+        return Set(resetsByDay.keys).union(creditsByDay.keys).sorted().map { day in
+            Self(date: day, events: (resetsByDay[day] ?? []).sorted { $0.date < $1.date },
+                 creditGrants: (creditsByDay[day] ?? []).sorted { $0.date < $1.date })
+        }
     }
 }

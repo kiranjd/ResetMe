@@ -50,6 +50,9 @@ public struct LimitBucket: Codable, Identifiable, Sendable {
     }
 }
 public struct ResetCredit: Codable, Sendable {
+    public var id: String?
+    public var resetType: String?
+    public var grantedAt: Double?
     public var expiresAt: Double?
     public var status: String?
 }
